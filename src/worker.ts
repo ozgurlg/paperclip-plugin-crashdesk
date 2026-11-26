@@ -14,7 +14,9 @@ import { ProviderError, type ErrorIssue, type ErrorProvider } from "./providers/
 import { buildTaskDescription, buildTaskTitle, originIdFor, sanitize } from "./task.ts";
 import {
   assigneeIds,
+  cleanAssignee,
   cleanProjectMap,
+  legacyCommonAssignee,
   readProjectMapValue,
   resolveProject,
   type NamedProject,
@@ -241,6 +243,20 @@ async function readProjectMap(ctx: PluginContext, companyId: string): Promise<Pr
   return readProjectMapValue(raw);
 }
 
+const defaultAssigneeKey = (companyId: string) => ({
+  scopeKind: "company" as const,
+  scopeId: companyId,
+  stateKey: "default-assignee",
+});
+
+/** One assignee for every error of the company ("agent:<id>", "user:<id>" or ""). */
+async function readDefaultAssignee(ctx: PluginContext, companyId: string): Promise<string> {
+  const saved = await ctx.state.get(defaultAssigneeKey(companyId));
+  if (typeof saved === "string") return cleanAssignee(saved);
+  // Not saved yet: an older version may have stored the same agent on every project.
+  return legacyCommonAssignee(await ctx.state.get(projectMapKey(companyId)));
+}
+
 /** Sentry projects seen in any cached error list, so they can be mapped. */
 async function seenSentryProjects(ctx: PluginContext, companyId: string): Promise<{ slug: string; name: string }[]> {
   const seen = new Map<string, { slug: string; name: string }>();
@@ -265,10 +281,11 @@ const plugin: PaperclipPlugin = definePlugin({
       const period = asPeriod(params.period);
       const result = await freshSnapshot(ctx, companyId, period);
       if ("problem" in result) return { configured: false, setupMessage: SETUP_MESSAGES[result.problem] };
-      const [links, projects, map] = await Promise.all([
+      const [links, projects, map, defaultAssignee] = await Promise.all([
         linkedTasks(ctx, companyId),
         paperclipProjects(ctx, companyId),
         readProjectMap(ctx, companyId),
+        readDefaultAssignee(ctx, companyId),
       ]);
       return {
         configured: true,
@@ -285,8 +302,10 @@ const plugin: PaperclipPlugin = definePlugin({
         // from the saved mapping or only from a matching name.
         projectMatches: Object.fromEntries(
           result.issues.flatMap((issue) => {
-            const { project, source, assignee } = resolveProject(issue.project, map, projects);
-            return project || assignee ? [[issue.id, { id: project?.id ?? "", name: project?.name ?? "", source, assignee }]] : [];
+            const { project, source } = resolveProject(issue.project, map, projects);
+            return project || defaultAssignee
+              ? [[issue.id, { id: project?.id ?? "", name: project?.name ?? "", source, assignee: defaultAssignee }]]
+              : [];
           }),
         ),
       };
@@ -294,11 +313,12 @@ const plugin: PaperclipPlugin = definePlugin({
 
     ctx.data.register(DATA_KEYS.projectMap, async (params) => {
       const companyId = asCompanyId(params.companyId);
-      if (!companyId) return { companyId: null, rows: [], paperclipProjects: [] };
-      const [projects, map, seen] = await Promise.all([
+      if (!companyId) return { companyId: null, rows: [], paperclipProjects: [], defaultAssignee: "" };
+      const [projects, map, seen, defaultAssignee] = await Promise.all([
         paperclipProjects(ctx, companyId),
         readProjectMap(ctx, companyId),
         seenSentryProjects(ctx, companyId),
+        readDefaultAssignee(ctx, companyId),
       ]);
       // Saved rows stay visible even when that Sentry project has no errors right now.
       const slugs = new Map(seen.map((p) => [p.slug, p]));
@@ -306,10 +326,10 @@ const plugin: PaperclipPlugin = definePlugin({
       const rows = [...slugs.values()]
         .sort((a, b) => a.slug.localeCompare(b.slug))
         .map((p) => {
-          const { project, source, assignee } = resolveProject(p, map, projects);
-          return { slug: p.slug, projectId: project?.id ?? "", source, assignee };
+          const { project, source } = resolveProject(p, map, projects);
+          return { slug: p.slug, projectId: project?.id ?? "", source };
         });
-      return { companyId, rows, paperclipProjects: projects };
+      return { companyId, rows, paperclipProjects: projects, defaultAssignee };
     });
 
     ctx.actions.register(ACTION_KEYS.saveProjectMap, async (params, actionCtx) => {
@@ -318,6 +338,9 @@ const plugin: PaperclipPlugin = definePlugin({
       const projects = await paperclipProjects(ctx, companyId);
       const map = cleanProjectMap(params.map, projects);
       await ctx.state.set(projectMapKey(companyId), map);
+      if (params.defaultAssignee !== undefined) {
+        await ctx.state.set(defaultAssigneeKey(companyId), cleanAssignee(params.defaultAssignee));
+      }
       ctx.logger.info("Saved project mapping", { companyId, entries: Object.keys(map).length });
       return { saved: Object.keys(map).length };
     });
@@ -360,15 +383,16 @@ const plugin: PaperclipPlugin = definePlugin({
             ? "high"
             : "medium";
       // An explicit choice (even "none", sent as "") wins; callers that send
-      // nothing get the project and default assignee from the mapping.
+      // nothing get the mapped project and the company default assignee.
       const mapped = resolveProject(
         detail.issue.project,
         await readProjectMap(ctx, companyId),
         await paperclipProjects(ctx, companyId),
       );
+      const defaultAssignee = await readDefaultAssignee(ctx, companyId);
       const projectId =
         params.projectId === undefined ? (mapped.project?.id ?? undefined) : (asCompanyId(params.projectId) ?? undefined);
-      const fromMapping = assigneeIds(mapped.assignee);
+      const fromMapping = assigneeIds(defaultAssignee);
       const explicitAssignee = params.assigneeAgentId !== undefined || params.assigneeUserId !== undefined;
       const assigneeAgentId = explicitAssignee ? (asCompanyId(params.assigneeAgentId) ?? undefined) : fromMapping.assigneeAgentId;
       const assigneeUserId = explicitAssignee ? (asCompanyId(params.assigneeUserId) ?? undefined) : fromMapping.assigneeUserId;

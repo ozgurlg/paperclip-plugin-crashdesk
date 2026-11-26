@@ -407,7 +407,7 @@ function CreateTaskForm({
           }}
         />
         {matchedProject?.assignee && assignee === matchedProject.assignee && (
-          <span style={{ fontSize: 11 }}>Default for {issue.project.slug}, from your project mapping</span>
+          <span style={{ fontSize: 11 }}>Company default assignee</span>
         )}
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg, minWidth: 200 }}>
@@ -878,8 +878,10 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
 
 interface ProjectMapData {
   companyId: string | null;
-  rows: { slug: string; projectId: string; source: "mapping" | "name" | null; assignee: string }[];
+  rows: { slug: string; projectId: string; source: "mapping" | "name" | null }[];
   paperclipProjects: { id: string; name: string }[];
+  /** One assignee for every error of the company, in the picker encoding. */
+  defaultAssignee: string;
 }
 
 function ProjectMappingPanel({
@@ -893,15 +895,16 @@ function ProjectMappingPanel({
 }) {
   const { data, loading, error, refresh } = usePluginData<ProjectMapData>("project-map", { companyId });
   const save = usePluginAction("save-project-map");
-  const [draft, setDraft] = useState<Record<string, { projectId: string; assignee: string }> | null>(null);
+  const [draft, setDraft] = useState<{ map: Record<string, string>; defaultAssignee: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
   const rows = data?.rows ?? [];
   // The draft starts from what is saved or suggested; editing changes only the draft.
-  const values = draft ?? Object.fromEntries(rows.map((r) => [r.slug, { projectId: r.projectId, assignee: r.assignee }]));
-  const edit = (slug: string, patch: Partial<{ projectId: string; assignee: string }>) =>
-    setDraft({ ...values, [slug]: { projectId: "", assignee: "", ...values[slug], ...patch } });
+  const values = draft ?? {
+    map: Object.fromEntries(rows.map((r) => [r.slug, r.projectId])),
+    defaultAssignee: data?.defaultAssignee ?? "",
+  };
   const unsaved = rows.some((r) => r.source !== "mapping") || draft !== null;
 
   async function onSave() {
@@ -909,11 +912,11 @@ function ProjectMappingPanel({
     setBusy(true);
     setMessage(null);
     try {
-      await save({ companyId, map: values });
+      await save({ companyId, map: values.map, defaultAssignee: values.defaultAssignee });
       setDraft(null);
       refresh();
       onSaved();
-      setMessage({ tone: "ok", text: "Saved. Create task now starts with these projects and assignees." });
+      setMessage({ tone: "ok", text: "Saved. Create task now uses these projects and this assignee." });
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
     } finally {
@@ -934,14 +937,27 @@ function ProjectMappingPanel({
           </button>
         </div>
         <p style={{ margin: 0, color: c.mutedFg, lineHeight: 1.5 }}>
-          Sentry knows which app each error comes from. Tell Crashdesk which Paperclip project that app belongs to, and
-          Create task will put the task there, assigned to the default you pick. A project with the same name is
-          suggested until you save; every task can still be changed before it is created.
+          Pick who fixes app errors, and which Paperclip project each Sentry project belongs to. Create task then
+          files the task there in one click. A project with the same name is suggested until you save; ⋯ on an
+          error still lets you change one task.
         </p>
       </div>
 
       {loading && !data && <p style={{ margin: 0, color: c.mutedFg }}>Loading…</p>}
       {error && <p style={{ margin: 0, color: c.destructive }}>{error.message}</p>}
+
+      {data && (
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: c.mutedFg, maxWidth: 320 }}>
+          Default assignee for all errors
+          <AssigneePicker
+            companyId={companyId}
+            value={values.defaultAssignee}
+            onChange={(defaultAssignee) => setDraft({ ...values, defaultAssignee })}
+            placeholder="Choose an agent"
+            noneLabel="No default"
+          />
+        </label>
+      )}
 
       {data && rows.length === 0 && (
         <p style={{ margin: 0, color: c.mutedFg }}>
@@ -951,19 +967,18 @@ function ProjectMappingPanel({
 
       {rows.length > 0 && companyId && (
         <div className="cd-table-wrap">
-          <table className="cd-table" style={{ minWidth: 720 }}>
+          <table className="cd-table" style={{ minWidth: 560 }}>
             <thead>
               <tr>
                 <th scope="col">Sentry project</th>
                 <th scope="col">Paperclip project</th>
-                <th scope="col">Default assignee</th>
                 <th scope="col">Status</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
-                const value = values[row.slug] ?? { projectId: "", assignee: "" };
-                const changed = draft !== null && (value.projectId !== row.projectId || value.assignee !== row.assignee);
+                const value = values.map[row.slug] ?? "";
+                const changed = draft !== null && value !== row.projectId;
                 const status = changed
                   ? "Not saved"
                   : row.source === "mapping"
@@ -977,19 +992,10 @@ function ProjectMappingPanel({
                     <td style={{ minWidth: 240 }}>
                       <ProjectPicker
                         companyId={companyId}
-                        value={value.projectId}
-                        onChange={(projectId) => edit(row.slug, { projectId })}
+                        value={value}
+                        onChange={(projectId) => setDraft({ ...values, map: { ...values.map, [row.slug]: projectId } })}
                         placeholder="No project"
                         noneLabel="No project"
-                      />
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      <AssigneePicker
-                        companyId={companyId}
-                        value={value.assignee}
-                        onChange={(assignee) => edit(row.slug, { assignee })}
-                        placeholder="Choose an agent"
-                        noneLabel="No default"
                       />
                     </td>
                     <td style={{ verticalAlign: "middle", color: status === "Saved" ? c.fg : c.mutedFg }}>{status}</td>
@@ -1001,7 +1007,7 @@ function ProjectMappingPanel({
         </div>
       )}
 
-      {rows.length > 0 && (
+      {data && (
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button type="button" className="cd-btn cd-btn-primary" onClick={() => void onSave()} disabled={busy || !unsaved}>
             {busy ? "Saving…" : "Save"}

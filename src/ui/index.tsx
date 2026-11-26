@@ -363,7 +363,7 @@ export function CrashdeskPage({ context }: PluginPageProps) {
     setRefreshing(true);
     setRefreshError(null);
     try {
-      await runRefresh({ period });
+      await runRefresh({ companyId, period });
       refresh();
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : "Refresh failed.");
@@ -635,14 +635,17 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
   });
   const runRefresh = usePluginAction("refresh");
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   async function syncNow() {
     setRefreshing(true);
+    setRefreshError(null);
     try {
-      await runRefresh({ period: "24h" });
+      await runRefresh({ companyId: context.companyId, period: "24h" });
       refresh();
-    } catch {
-      // The page shows refresh errors in full; the widget keeps the last data.
+    } catch (err) {
+      // Keep the last data on screen, but say that the refresh did not work.
+      setRefreshError(err instanceof Error ? err.message : "Refresh failed.");
     } finally {
       setRefreshing(false);
     }
@@ -684,6 +687,11 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
 
       {loading && !data && <p style={{ margin: 0, fontSize: 13, color: c.mutedFg }}>Loading errors…</p>}
       {error && <p style={{ margin: 0, fontSize: 13, color: c.destructive }}>{error.message}</p>}
+      {refreshError && (
+        <p role="alert" style={{ margin: 0, fontSize: 13, color: c.destructive }}>
+          {refreshError}
+        </p>
+      )}
 
       {data && !data.configured && (
         <p style={{ margin: 0, fontSize: 13, color: c.mutedFg, lineHeight: 1.5 }}>

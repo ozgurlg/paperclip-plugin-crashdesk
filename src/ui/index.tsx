@@ -181,7 +181,7 @@ const CSS = `
   .cd-issues tbody { display: flex; flex-direction: column; gap: 12px; }
   .cd-issues tr { display: block; border: 1px solid ${c.border}; }
   .cd-issues td { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 0; padding: 8px 14px; text-align: left !important; }
-  .cd-issues td:first-child { display: block; padding-top: 12px; }
+  .cd-issues td:first-child { display: block; padding-top: 12px; min-width: 0; overflow-wrap: anywhere; }
   .cd-issues td[data-label]::before { content: attr(data-label); color: ${c.mutedFg}; font-size: 12px; flex-shrink: 0; }
   .cd-issues td:last-child { padding-bottom: 12px; }
   .cd-issues td[colspan] { display: block; }
@@ -698,10 +698,10 @@ function IssueRow({
               <Dot color={LEVEL_COLOR[issue.level]} label={issue.level} />
             </span>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
-              <a href={issue.url} target="_blank" rel="noopener noreferrer" className="cd-link" style={{ fontFamily: c.mono, wordBreak: "break-word" }}>
+              <a href={issue.url} target="_blank" rel="noopener noreferrer" className="cd-link" style={{ fontFamily: c.mono, overflowWrap: "anywhere" }}>
                 {issue.title}
               </a>
-              <span style={{ color: c.mutedFg }}>
+              <span style={{ color: c.mutedFg, overflowWrap: "anywhere" }}>
                 {[
                   issue.culprit,
                   issue.isRegression ? "regression" : issue.isNew ? `new, first seen ${timeAgo(issue.firstSeen)}` : `first seen ${timeAgo(issue.firstSeen)}`,

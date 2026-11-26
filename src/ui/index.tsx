@@ -8,6 +8,7 @@ import {
   usePluginData,
   type PluginPageProps,
   type PluginSidebarProps,
+  type PluginCompanySettingsPageProps,
   type PluginWidgetProps,
 } from "@paperclipai/plugin-sdk/ui";
 
@@ -50,10 +51,18 @@ type Overview =
       snapshot: { period: Period; fetchedAt: string; ok: boolean; error: string | null; issues: ErrorIssue[] };
       links: Record<string, LinkedTask>;
       /** Paperclip project with the same name as the error's Sentry project, keyed by issue id. */
-      projectMatches?: Record<string, { id: string; name: string }>;
+      projectMatches?: Record<string, ProjectMatch>;
     };
 
 const PAGE_PATH = "/crashdesk";
+const SETTINGS_PATH = "/company/settings/crashdesk-projects";
+
+/** Paperclip project of an error: from the saved mapping, or only suggested by a matching name. */
+interface ProjectMatch {
+  id: string;
+  name: string;
+  source: "mapping" | "name";
+}
 
 /**
  * Paperclip routes are company-scoped ("/<PREFIX>/crashdesk"). The host does
@@ -272,7 +281,7 @@ function CreateTaskForm({
 }: {
   companyId: string;
   issue: ErrorIssue;
-  matchedProject: { id: string; name: string } | undefined;
+  matchedProject: ProjectMatch | undefined;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -323,7 +332,11 @@ function CreateTaskForm({
         Project
         <ProjectPicker companyId={companyId} value={projectId} onChange={setProjectId} placeholder="No project" noneLabel="No project" />
         {matchedProject && projectId === matchedProject.id && (
-          <span style={{ fontSize: 11 }}>Matched by name to Sentry project {issue.project.slug}</span>
+          <span style={{ fontSize: 11 }}>
+            {matchedProject.source === "mapping"
+              ? `From your project mapping for ${issue.project.slug}`
+              : `Suggested by name. Save it in Settings → Crashdesk projects.`}
+          </span>
         )}
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg }}>
@@ -358,6 +371,7 @@ function CreateTaskForm({
 
 export function CrashdeskPage({ context }: PluginPageProps) {
   const companyId = context.companyId;
+  const companyLink = useCompanyLink();
   const [period, setPeriod] = useState<Period>("24h");
   const [project, setProject] = useState("all");
   const [openForm, setOpenForm] = useState<string | null>(null);
@@ -412,6 +426,9 @@ export function CrashdeskPage({ context }: PluginPageProps) {
 
       <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, borderBottom: `1px solid ${c.border}`, paddingBottom: 16 }}>
         <h1 style={{ ...sectionTitle, fontSize: 17, flexGrow: 1 }}>App Errors</h1>
+        <a {...companyLink(SETTINGS_PATH)} className="cd-btn" style={{ textDecoration: "none" }}>
+          Project mapping
+        </a>
         {projects.length > 1 && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: c.mutedFg }}>
             Project
@@ -762,6 +779,128 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
       <a {...companyLink(PAGE_PATH)} className="cd-link" style={{ fontSize: 13, color: c.mutedFg, alignSelf: "flex-start" }}>
         {data && !data.configured ? "Set up Crashdesk →" : "Open Crashdesk →"}
       </a>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings → Crashdesk projects: map each Sentry project to a Paperclip project
+// ---------------------------------------------------------------------------
+
+interface ProjectMapData {
+  companyId: string | null;
+  rows: { slug: string; projectId: string; source: "mapping" | "name" | null }[];
+  paperclipProjects: { id: string; name: string }[];
+}
+
+export function CrashdeskProjectSettings({ context }: PluginCompanySettingsPageProps) {
+  const companyId = context.companyId;
+  const { data, loading, error, refresh } = usePluginData<ProjectMapData>("project-map", { companyId });
+  const save = usePluginAction("save-project-map");
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  const rows = data?.rows ?? [];
+  // The draft starts from what is saved or suggested; editing changes only the draft.
+  const values = draft ?? Object.fromEntries(rows.map((r) => [r.slug, r.projectId]));
+  const unsaved = rows.some((r) => r.source !== "mapping") || draft !== null;
+
+  async function onSave() {
+    if (!companyId) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await save({ companyId, map: values });
+      setDraft(null);
+      refresh();
+      setMessage({ tone: "ok", text: "Saved. Create task now uses these projects." });
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="cd-root" style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 760 }}>
+      <style>{CSS}</style>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Crashdesk projects</h1>
+        <p style={{ margin: 0, color: c.mutedFg, lineHeight: 1.5 }}>
+          Sentry knows which app each error comes from. Tell Crashdesk which Paperclip project that app belongs to, and
+          Create task will put the task there. A project with the same name is suggested until you save.
+        </p>
+      </div>
+
+      {loading && !data && <p style={{ margin: 0, color: c.mutedFg }}>Loading…</p>}
+      {error && <p style={{ margin: 0, color: c.destructive }}>{error.message}</p>}
+
+      {data && rows.length === 0 && (
+        <p style={{ margin: 0, color: c.mutedFg }}>
+          No Sentry projects yet. A project shows up here once it has an unresolved error in the last 14 days.
+        </p>
+      )}
+
+      {rows.length > 0 && companyId && (
+        <div className="cd-table-wrap">
+          <table className="cd-table" style={{ minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th scope="col">Sentry project</th>
+                <th scope="col">Paperclip project</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const value = values[row.slug] ?? "";
+                const changed = draft !== null && value !== row.projectId;
+                const status = changed
+                  ? "Not saved"
+                  : row.source === "mapping"
+                    ? "Saved"
+                    : row.source === "name"
+                      ? "Suggested by name"
+                      : "Not mapped";
+                return (
+                  <tr key={row.slug}>
+                    <td style={{ fontFamily: c.mono, verticalAlign: "middle" }}>{row.slug}</td>
+                    <td style={{ minWidth: 240 }}>
+                      <ProjectPicker
+                        companyId={companyId}
+                        value={value}
+                        onChange={(projectId) => setDraft({ ...values, [row.slug]: projectId })}
+                        placeholder="No project"
+                        noneLabel="No project"
+                      />
+                    </td>
+                    <td style={{ verticalAlign: "middle", color: status === "Saved" ? c.fg : c.mutedFg }}>{status}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button type="button" className="cd-btn cd-btn-primary" onClick={() => void onSave()} disabled={busy || !unsaved}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+          {draft !== null && (
+            <button type="button" className="cd-btn" onClick={() => setDraft(null)} disabled={busy}>
+              Reset
+            </button>
+          )}
+          {message && (
+            <span role={message.tone === "error" ? "alert" : "status"} style={{ fontSize: 13, color: message.tone === "error" ? c.destructive : c.mutedFg }}>
+              {message.text}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

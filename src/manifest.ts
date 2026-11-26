@@ -4,6 +4,7 @@ import {
   EXPORT_NAMES,
   JOB_KEYS,
   PAGE_ROUTE,
+  SETTINGS_ROUTE,
   PERIODS,
   PLUGIN_ID,
   PLUGIN_VERSION,
@@ -128,6 +129,15 @@ const manifest: PaperclipPluginManifestV1 = {
         id: SLOT_IDS.dashboardWidget,
         displayName: "App Errors",
         exportName: EXPORT_NAMES.dashboardWidget,
+      },
+      {
+        // Its own page under Settings, next to Secrets and Members. The
+        // generated plugin settings form cannot hold per-project pickers.
+        type: "companySettingsPage",
+        id: SLOT_IDS.projectSettings,
+        displayName: "Crashdesk projects",
+        exportName: EXPORT_NAMES.projectSettings,
+        routePath: SETTINGS_ROUTE,
       },
     ],
   },

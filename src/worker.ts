@@ -12,7 +12,7 @@ import { ACTION_KEYS, DATA_KEYS, DEFAULTS, JOB_KEYS, ORIGIN_KIND, PERIODS, TOOL_
 import { createSentryProvider } from "./providers/sentry.ts";
 import { ProviderError, type ErrorIssue, type ErrorProvider } from "./providers/types.ts";
 import { buildTaskDescription, buildTaskTitle, originIdFor, sanitize } from "./task.ts";
-import { matchProject, type NamedProject } from "./match.ts";
+import { cleanProjectMap, resolveProject, type NamedProject, type ProjectMap } from "./match.ts";
 
 // Paperclip keeps plugin settings per company, so everything here is scoped
 // to a company: its settings, its cached error lists and its tasks. Calls from
@@ -219,6 +219,34 @@ async function paperclipProjects(ctx: PluginContext, companyId: string): Promise
 }
 
 // ---------------------------------------------------------------------------
+// Project mapping: Sentry project slug → Paperclip project, saved per company
+// ---------------------------------------------------------------------------
+
+const projectMapKey = (companyId: string) => ({
+  scopeKind: "company" as const,
+  scopeId: companyId,
+  stateKey: "project-map",
+});
+
+async function readProjectMap(ctx: PluginContext, companyId: string): Promise<ProjectMap> {
+  const raw = await ctx.state.get(projectMapKey(companyId));
+  // Entries are validated on save; reading again keeps old junk out.
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as ProjectMap) : {};
+}
+
+/** Sentry projects seen in any cached error list, so they can be mapped. */
+async function seenSentryProjects(ctx: PluginContext, companyId: string): Promise<{ slug: string; name: string }[]> {
+  const seen = new Map<string, { slug: string; name: string }>();
+  for (const period of PERIODS) {
+    const snapshot = await readSnapshot(ctx, companyId, period);
+    for (const issue of snapshot?.issues ?? []) {
+      if (issue.project.slug) seen.set(issue.project.slug, { slug: issue.project.slug, name: issue.project.name });
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -230,7 +258,11 @@ const plugin: PaperclipPlugin = definePlugin({
       const period = asPeriod(params.period);
       const result = await freshSnapshot(ctx, companyId, period);
       if ("problem" in result) return { configured: false, setupMessage: SETUP_MESSAGES[result.problem] };
-      const [links, projects] = await Promise.all([linkedTasks(ctx, companyId), paperclipProjects(ctx, companyId)]);
+      const [links, projects, map] = await Promise.all([
+        linkedTasks(ctx, companyId),
+        paperclipProjects(ctx, companyId),
+        readProjectMap(ctx, companyId),
+      ]);
       return {
         configured: true,
         provider: "Sentry",
@@ -242,13 +274,45 @@ const plugin: PaperclipPlugin = definePlugin({
             return link ? [[issue.id, link]] : [];
           }),
         ),
+        // The Paperclip project each error belongs to, and whether that comes
+        // from the saved mapping or only from a matching name.
         projectMatches: Object.fromEntries(
           result.issues.flatMap((issue) => {
-            const match = matchProject(issue.project, projects);
-            return match ? [[issue.id, match]] : [];
+            const { project, source } = resolveProject(issue.project, map, projects);
+            return project && source ? [[issue.id, { ...project, source }]] : [];
           }),
         ),
       };
+    });
+
+    ctx.data.register(DATA_KEYS.projectMap, async (params) => {
+      const companyId = asCompanyId(params.companyId);
+      if (!companyId) return { companyId: null, rows: [], paperclipProjects: [] };
+      const [projects, map, seen] = await Promise.all([
+        paperclipProjects(ctx, companyId),
+        readProjectMap(ctx, companyId),
+        seenSentryProjects(ctx, companyId),
+      ]);
+      // Saved rows stay visible even when that Sentry project has no errors right now.
+      const slugs = new Map(seen.map((p) => [p.slug, p]));
+      for (const slug of Object.keys(map)) if (!slugs.has(slug)) slugs.set(slug, { slug, name: slug });
+      const rows = [...slugs.values()]
+        .sort((a, b) => a.slug.localeCompare(b.slug))
+        .map((p) => {
+          const { project, source } = resolveProject(p, map, projects);
+          return { slug: p.slug, projectId: project?.id ?? "", source };
+        });
+      return { companyId, rows, paperclipProjects: projects };
+    });
+
+    ctx.actions.register(ACTION_KEYS.saveProjectMap, async (params, actionCtx) => {
+      const companyId = asCompanyId(params.companyId, actionCtx.companyId);
+      if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
+      const projects = await paperclipProjects(ctx, companyId);
+      const map = cleanProjectMap(params.map, projects);
+      await ctx.state.set(projectMapKey(companyId), map);
+      ctx.logger.info("Saved project mapping", { companyId, entries: Object.keys(map).length });
+      return { saved: Object.keys(map).length };
     });
 
     ctx.actions.register(ACTION_KEYS.refresh, async (params, actionCtx) => {
@@ -291,10 +355,10 @@ const plugin: PaperclipPlugin = definePlugin({
       const assigneeAgentId = asCompanyId(params.assigneeAgentId) ?? undefined;
       const assigneeUserId = asCompanyId(params.assigneeUserId) ?? undefined;
       // An explicit choice (even "no project", sent as "") wins; callers that
-      // send nothing get the Paperclip project with the same name, if any.
+      // send nothing get the mapped project (or the one with the same name).
       const projectId =
         params.projectId === undefined
-          ? (matchProject(detail.issue.project, await paperclipProjects(ctx, companyId))?.id ?? undefined)
+          ? (resolveProject(detail.issue.project, await readProjectMap(ctx, companyId), await paperclipProjects(ctx, companyId)).project?.id ?? undefined)
           : (asCompanyId(params.projectId) ?? undefined);
 
       const task = await ctx.issues.create({

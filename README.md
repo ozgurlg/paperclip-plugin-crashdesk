@@ -22,7 +22,7 @@ Sentry is already great at showing errors. What it cannot do is say "Software En
 
 - **Dashboard widget.** The day's headline numbers and the three most frequent errors, right on the Paperclip dashboard.
 - **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project.
-- **Create task.** Turn an error into a Paperclip task. Choose the assignee, project and priority with Paperclip's own pickers. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
+- **Create task.** Turn an error into a Paperclip task. Choose the assignee and priority with Paperclip's own pickers; the project comes from your project mapping. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
 - **No duplicates.** Each task is linked to its error, so the same error never becomes two open tasks, and the table shows every linked task's live status.
 - **Agent tools.** Agents can call `list-errors` and `get-error` to check on errors themselves.
 - **Native look.** Built on Paperclip's own theme tokens and components. Follows light and dark mode.
@@ -94,6 +94,8 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 | Refresh interval | no | Minutes between background syncs. Default 10, at least 5. **Refresh** on the page syncs right away. |
 
 Settings are per company, so each Paperclip company can connect its own Sentry organization. One token covers every project in the organization: Crashdesk shows them all and the errors page filters by project.
+
+4. **Map projects.** Open **Settings → Crashdesk projects** (or **Project mapping** on the errors page). Each Sentry project that has errors gets a row: pick the Paperclip project its tasks belong to and press **Save**. A Paperclip project with the same name is suggested until you save. Sentry and Paperclip know nothing about each other, so this is the one place that links them.
 
 The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (or `/<company-prefix>/crashdesk`) opens the full errors page. The first sync runs right away.
 

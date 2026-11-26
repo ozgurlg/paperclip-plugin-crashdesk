@@ -162,3 +162,40 @@ test("network failures are reported as network errors", async () => {
     (err: unknown) => err instanceof ProviderError && err.kind === "network",
   );
 });
+
+function writer(statuses: number[]) {
+  const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  const provider = createSentryProvider({
+    baseUrl: "https://sentry.io",
+    organization: "acme",
+    token: "t",
+    projects: [],
+    environment: null,
+    fetch: async (url, init) => {
+      calls.push({ url, method: init?.method ?? "GET", body: JSON.parse(String(init?.body ?? "null")) });
+      return new Response("{}", { status: statuses.shift() ?? 200 });
+    },
+  });
+  return { provider, calls };
+}
+
+test("resolveIssue resolves in the next release", async () => {
+  const { provider, calls } = writer([200]);
+  await provider.resolveIssue!("4821");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.method, "PUT");
+  assert.equal(calls[0]!.url, "https://sentry.io/api/0/organizations/acme/issues/4821/?");
+  assert.deepEqual(calls[0]!.body, { status: "resolved", statusDetails: { inNextRelease: true } });
+});
+
+test("resolveIssue falls back to a plain resolve when the project has no release", async () => {
+  const { provider, calls } = writer([400, 200]);
+  await provider.resolveIssue!("4821");
+  assert.deepEqual(calls[1]!.body, { status: "resolved" });
+});
+
+test("resolveIssue names the missing write scope", async () => {
+  const { provider, calls } = writer([403]);
+  await assert.rejects(provider.resolveIssue!("4821"), (err: unknown) => err instanceof ProviderError && err.kind === "auth" && /event:write/.test(err.message));
+  assert.equal(calls.length, 1);
+});

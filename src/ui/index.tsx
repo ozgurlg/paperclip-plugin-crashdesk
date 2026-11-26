@@ -53,6 +53,10 @@ type Overview =
       targets?: Record<string, Target>;
       /** "" until someone picks who gets errors. */
       defaultAssignee?: string;
+      /** A finished task resolves its error in the tracker. */
+      resolveWhenDone?: boolean;
+      /** Why the last attempt to resolve an error failed, if it did. */
+      resolveError?: string | null;
     };
 
 const PAGE_PATH = "/crashdesk";
@@ -760,6 +764,7 @@ export function CrashdeskPage({ context }: PluginPageProps) {
       users: inProject.reduce((sum, i) => sum + i.users, 0),
       tracked,
       untracked: inProject.length - tracked,
+      fixed: inProject.filter((i) => links[i.id]?.status === "done").length,
     };
   }, [inProject, links]);
 
@@ -827,6 +832,15 @@ export function CrashdeskPage({ context }: PluginPageProps) {
         <>
           {!data.snapshot.ok && data.snapshot.error && (
             <Banner tone="error">Last sync failed: {data.snapshot.error} Showing the last list that loaded.</Banner>
+          )}
+
+          {data.resolveError && <Banner tone="error">Could not resolve fixed errors in {data.provider}: {data.resolveError}</Banner>}
+          {!data.resolveWhenDone && stats.fixed > 0 && (
+            <Banner tone="info">
+              {plural(stats.fixed, "error")} {stats.fixed === 1 ? "has" : "have"} a finished task but {stats.fixed === 1 ? "is" : "are"} still
+              open in {data.provider}. Turn on “Resolve fixed errors” in Settings → Plugins → Crashdesk and Crashdesk closes
+              them for you when a task is done.
+            </Banner>
           )}
 
           <div className="cd-stats">
@@ -971,13 +985,29 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
 
   const issues = data?.configured ? data.snapshot.issues : [];
   const links = data?.configured ? data.links : {};
-  const top = issues.slice(0, 3);
+  const top = issues[0];
   const untracked = issues.filter((i) => !isOpenTask(links[i.id])).length;
-  const numbers = [
-    { label: "Unresolved", value: issues.length, alert: false },
-    { label: "New", value: issues.filter((i) => i.isNew || i.isRegression).length, alert: false },
-    { label: "Without a task", value: untracked, alert: untracked > 0 },
-  ];
+  const fresh = issues.filter((i) => i.isNew || i.isRegression).length;
+  const users = issues.reduce((sum, i) => sum + i.users, 0);
+  // All events of the listed errors, hour by hour.
+  const trend = issues.reduce<number[]>((sum, i) => i.trend.map((v, at) => v + (sum[at] ?? 0)), []);
+
+  // One line per project: how much is broken there, and how much of it someone is on.
+  const projects = [
+    ...issues
+      .reduce((map, i) => {
+        const row = map.get(i.project.slug) ?? { slug: i.project.slug, name: i.project.name, total: 0, fresh: 0, regressions: 0, untracked: 0, users: 0, events: 0 };
+        row.total += 1;
+        row.fresh += i.isNew && !i.isRegression ? 1 : 0;
+        row.regressions += i.isRegression ? 1 : 0;
+        row.untracked += isOpenTask(links[i.id]) ? 0 : 1;
+        row.users += i.users;
+        row.events += i.events;
+        return map.set(i.project.slug, row);
+      }, new Map<string, { slug: string; name: string; total: number; fresh: number; regressions: number; untracked: number; users: number; events: number }>())
+      .values(),
+  ].sort((a, b) => b.untracked - a.untracked || b.events - a.events);
+  const shown = projects.slice(0, 4);
 
   return (
     // `contain` keeps long error text from widening the host's dashboard column.
@@ -1029,49 +1059,100 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
             </div>
           ) : (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-                {numbers.map((n) => (
-                  <div key={n.label} style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                    <span style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1, color: n.alert ? c.yellow : undefined }}>
-                      {fmt(n.value)}
-                    </span>
-                    <span style={{ fontSize: 12, color: c.mutedFg }}>{n.label}</span>
-                  </div>
-                ))}
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 12, minWidth: 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, flexGrow: 1, minWidth: 0 }}>
+                  <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{fmt(issues.length)}</span>
+                    <span style={{ fontSize: 14 }}>unresolved {issues.length === 1 ? "error" : "errors"}</span>
+                  </span>
+                  <span style={{ fontSize: 12, color: c.mutedFg }}>
+                    {fmt(fresh)} new · {plural(users, "user")} affected
+                  </span>
+                </div>
+                {trend.length > 0 && <Sparkline values={trend} hot={fresh > 0} />}
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: `1px solid ${c.border}`, paddingTop: 12 }}>
-                {top.map((issue) => {
-                  const link = links[issue.id];
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                {untracked > 0 ? (
+                  <>
+                    <Dot color={c.yellow} />
+                    <span>
+                      {plural(untracked, "error")} without a task
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ color: c.green, display: "flex" }}>
+                      <CheckIcon size={16} />
+                    </span>
+                    <span>Every error has a task</span>
+                  </>
+                )}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, borderTop: `1px solid ${c.border}`, paddingTop: 12 }}>
+                {shown.map((p) => {
+                  const covered = p.total - p.untracked;
+                  const notes = [
+                    p.regressions > 0 ? plural(p.regressions, "regression") : "",
+                    p.fresh > 0 ? `${fmt(p.fresh)} new` : "",
+                    p.untracked > 0 ? `${fmt(p.untracked)} without a task` : "all have a task",
+                  ].filter(Boolean);
                   return (
-                    <div key={issue.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", minWidth: 0 }}>
-                      <span style={{ marginTop: 5 }}>
-                        <Dot color={LEVEL_COLOR[issue.level]} label={issue.level} />
-                      </span>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flexGrow: 1 }}>
-                        <span className="cd-clamp" title={issue.title} style={{ fontFamily: c.mono, fontSize: 12.5 }}>
-                          {issue.title}
-                        </span>
-                        <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px", fontSize: 12, color: c.mutedFg }}>
-                          <span>
-                            {issue.project.name} · {plural(issue.events, "event")} · {plural(issue.users, "user")}
-                          </span>
-                          {link ? (
-                            <span className="cd-badge">
-                              <Dot color={STATUS_COLOR[link.status] ?? c.mutedFg} />
-                              {link.identifier ?? "Task"} · {link.status.replace("_", " ")}
-                            </span>
-                          ) : (
-                            <span className="cd-badge" style={{ color: c.yellow, borderColor: c.yellow }}>
-                              No task
-                            </span>
-                          )}
+                    <div key={p.slug} style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                        <span style={{ fontWeight: 500, flexGrow: 1, minWidth: 0, overflowWrap: "anywhere" }}>{p.name}</span>
+                        <span style={{ fontSize: 12, color: c.mutedFg, whiteSpace: "nowrap" }}>
+                          {plural(p.total, "error")} · {plural(p.users, "user")}
                         </span>
                       </div>
+                      <div
+                        role="img"
+                        aria-label={`${covered} of ${p.total} errors have a task`}
+                        style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", background: c.muted }}
+                      >
+                        <span style={{ width: `${(covered / p.total) * 100}%`, background: c.green }} />
+                        <span style={{ flexGrow: 1, background: c.yellow }} />
+                      </div>
+                      <span style={{ fontSize: 12, color: c.mutedFg }}>{notes.join(" · ")}</span>
                     </div>
                   );
                 })}
+                {projects.length > shown.length && (
+                  <span style={{ fontSize: 12, color: c.mutedFg }}>and {plural(projects.length - shown.length, "more project")}</span>
+                )}
               </div>
+
+              {top && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: `1px solid ${c.border}`, paddingTop: 12 }}>
+                  <span style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: c.mutedFg }}>Most frequent</span>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", minWidth: 0 }}>
+                    <span style={{ marginTop: 5 }}>
+                      <Dot color={LEVEL_COLOR[top.level]} label={top.level} />
+                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flexGrow: 1 }}>
+                      <span className="cd-clamp" title={top.title} style={{ fontFamily: c.mono, fontSize: 12.5 }}>
+                        {top.title}
+                      </span>
+                      <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px", fontSize: 12, color: c.mutedFg }}>
+                        <span>
+                          {top.project.name} · {plural(top.events, "event")} · {plural(top.users, "user")}
+                        </span>
+                        {links[top.id] ? (
+                          <span className="cd-badge">
+                            <Dot color={STATUS_COLOR[links[top.id]!.status] ?? c.mutedFg} />
+                            {links[top.id]!.identifier ?? "Task"} · {links[top.id]!.status.replace("_", " ")}
+                          </span>
+                        ) : (
+                          <span className="cd-badge" style={{ color: c.yellow, borderColor: c.yellow }}>
+                            No task
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </>
@@ -1080,9 +1161,7 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
       <a {...companyLink(PAGE_PATH)} className="cd-link" style={{ fontSize: 13, color: c.mutedFg, alignSelf: "flex-start" }}>
         {data && !data.configured
           ? "Set up Crashdesk →"
-          : issues.length > top.length
-            ? `See all ${fmt(issues.length)} errors →`
-            : "Open Crashdesk →"}
+          : "Open Crashdesk →"}
       </a>
     </div>
   );

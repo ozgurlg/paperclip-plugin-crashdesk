@@ -6,6 +6,8 @@ export interface CrashdeskConfig {
   organization: string;
   authToken: string | EnvSecretRefBinding | null;
   pollIntervalMinutes: number;
+  /** Mark the error as resolved in the tracker when its task is done. Needs a token that can write. */
+  resolveWhenDone: boolean;
 }
 
 /** Settings keys, as declared in the manifest. */
@@ -14,6 +16,7 @@ export const CONFIG_KEYS = {
   url: "url",
   token: "token",
   refreshMinutes: "refreshMinutes",
+  resolveWhenDone: "resolveWhenDone",
 } as const;
 
 const MIN_REFRESH_MINUTES = 5; // the sync job runs every 5 minutes
@@ -32,6 +35,7 @@ export function parseConfig(raw: Record<string, unknown>): CrashdeskConfig {
         ? (token as string | EnvSecretRefBinding)
         : null,
     pollIntervalMinutes: refreshMinutes(raw[CONFIG_KEYS.refreshMinutes]),
+    resolveWhenDone: raw[CONFIG_KEYS.resolveWhenDone] === true,
   };
 }
 

@@ -42,7 +42,8 @@ const manifest: PaperclipPluginManifestV1 = {
   },
   // Paperclip stores this schema as Postgres jsonb, which orders keys by
   // length, then alphabetically. The form follows that order, so the key
-  // names are chosen to read top to bottom: org, url, token, refreshMinutes.
+  // names are chosen to read top to bottom: org, url, token, refreshMinutes,
+  // resolveWhenDone.
   // Project and environment choices will come as pick lists on a custom
   // settings page (see ROADMAP.md), not as free-text fields.
   instanceConfigSchema: {
@@ -65,7 +66,7 @@ const manifest: PaperclipPluginManifestV1 = {
         format: "secret-ref",
         title: "Auth token",
         description:
-          "A Sentry token with the event:read scope, stored as a Paperclip secret. In Sentry: Settings → Developer Settings → Custom Integrations → New Internal Integration, Issue & Event: Read.",
+          "A Sentry token stored as a Paperclip secret. In Sentry: Settings → Developer Settings → Custom Integrations → New Internal Integration, Issue & Event: Read (Read & Write if Crashdesk should resolve fixed errors).",
       },
       refreshMinutes: {
         type: "number",
@@ -73,6 +74,13 @@ const manifest: PaperclipPluginManifestV1 = {
         description: "How often errors are fetched in the background. At least 5.",
         default: DEFAULTS.pollIntervalMinutes,
         minimum: 5,
+      },
+      resolveWhenDone: {
+        type: "boolean",
+        title: "Resolve fixed errors in Sentry",
+        description:
+          "When an error's task is done, mark the error as resolved in the next release, so it leaves the list and comes back as a regression if the fix did not hold. Needs a token with Issue & Event: Read & Write.",
+        default: false,
       },
     },
     required: ["org"],

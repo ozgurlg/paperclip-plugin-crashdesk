@@ -119,3 +119,8 @@ test("a fix task lists the related errors it also covers", () => {
   assert.ok(text.includes("SHOP-APP-1B: Same cause"));
   assert.ok(text.includes("This task covers 2 errors"));
 });
+
+test("the task says who resolves the error", () => {
+  assert.ok(buildTaskDescription(detail(), "Sentry").endsWith("When the fix ships, resolve the issue in Sentry."));
+  assert.ok(buildTaskDescription(detail(), "Sentry", [], true).includes("Crashdesk marks the issue as resolved in Sentry"));
+});

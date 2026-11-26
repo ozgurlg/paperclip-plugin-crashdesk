@@ -70,6 +70,8 @@ export function buildTaskDescription(
   detail: ErrorIssueDetail,
   providerName: string,
   related: ErrorIssueDetail[] = [],
+  /** Crashdesk resolves the error in the tracker itself when the task is done. */
+  autoResolve = false,
 ): string {
   const { issue } = detail;
   const link = safeUrl(issue.url);
@@ -117,12 +119,15 @@ export function buildTaskDescription(
   lines.push(UNTRUSTED_CLOSE);
   lines.push("");
   if (related.length > 0) {
-    lines.push(`This task covers ${related.length + 1} errors. Resolve each of them in the error tracker when the fix ships.`);
+    lines.push(`This task covers ${related.length + 1} errors with one root cause.`);
     lines.push("");
   }
+  const what = related.length > 0 ? "these errors" : "the issue";
   lines.push(
     `Open the issue${link ? " link above" : ""} for the full event, breadcrumbs and other occurrences. ` +
-      "When the fix ships, resolve the issue in the error tracker.",
+      (autoResolve
+        ? `When this task is done, Crashdesk marks ${what} as resolved in ${providerName}; do not resolve ${related.length > 0 ? "them" : "it"} yourself.`
+        : `When the fix ships, resolve ${what} in ${providerName}.`),
   );
   return lines.join("\n");
 }

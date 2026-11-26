@@ -311,6 +311,78 @@ async function readGroups(ctx: PluginContext, companyId: string): Promise<Record
   return groups;
 }
 
+// ---------------------------------------------------------------------------
+// Closing the loop: a finished task resolves its error in the tracker
+// ---------------------------------------------------------------------------
+
+const resolvedKey = (companyId: string) => ({
+  scopeKind: "company" as const,
+  scopeId: companyId,
+  stateKey: "resolved-by-task",
+});
+
+const resolveErrorKey = (companyId: string) => ({
+  scopeKind: "company" as const,
+  scopeId: companyId,
+  stateKey: "resolve-error",
+});
+
+/**
+ * Resolves every listed error whose task is done. Each task resolves its error
+ * once: if the error comes back as a regression, the same finished task must
+ * not close it again, so the error stays visible until someone opens a new task.
+ */
+async function resolveFinished(ctx: PluginContext, companyId: string): Promise<number> {
+  const setup = await getProvider(ctx, companyId);
+  if ("problem" in setup || !setup.config.resolveWhenDone || !setup.provider.resolveIssue) return 0;
+
+  const links = await linkedTasks(ctx, companyId);
+  const raw = await ctx.state.get(resolvedKey(companyId));
+  const resolved: Record<string, string> =
+    raw !== null && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, string>) } : {};
+
+  const snapshots = new Map<Period, Snapshot>();
+  for (const period of PERIODS) {
+    const snapshot = await readSnapshot(ctx, companyId, period);
+    if (snapshot) snapshots.set(period, snapshot);
+  }
+
+  const closed = new Set<string>();
+  const tried = new Set<string>();
+  let failure: string | null = null;
+  for (const snapshot of snapshots.values()) {
+    for (const issue of snapshot.issues) {
+      if (failure || tried.has(issue.id)) continue;
+      tried.add(issue.id);
+      const originId = originIdFor(setup.provider.id, issue.id);
+      const task = links[originId];
+      if (!task || task.status !== "done" || resolved[originId] === task.id) continue;
+      try {
+        await setup.provider.resolveIssue(issue.id);
+        resolved[originId] = task.id;
+        closed.add(issue.id);
+      } catch (err) {
+        failure = errorMessage(err);
+        ctx.logger.warn("Could not resolve error in the tracker", { companyId, issueId: issue.id, error: failure });
+      }
+    }
+  }
+
+  if (closed.size > 0) {
+    await ctx.state.set(resolvedKey(companyId), resolved);
+    // Take them off the cached lists now; the next sync confirms it.
+    for (const [period, snapshot] of snapshots) {
+      await ctx.state.set(stateKey(companyId, period), {
+        ...snapshot,
+        issues: snapshot.issues.filter((issue) => !closed.has(issue.id)),
+      });
+    }
+    ctx.logger.info("Resolved errors with finished tasks", { companyId, count: closed.size });
+  }
+  await ctx.state.set(resolveErrorKey(companyId), failure);
+  return closed.size;
+}
+
 const isOpen = (task: LinkedTask | undefined) => Boolean(task) && task!.status !== "done" && task!.status !== "cancelled";
 
 const ERROR_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -340,14 +412,19 @@ const plugin: PaperclipPlugin = definePlugin({
       const period = asPeriod(params.period);
       const result = await freshSnapshot(ctx, companyId, period);
       if ("problem" in result) return { configured: false, setupMessage: SETUP_MESSAGES[result.problem] };
-      const [links, projects, map, fallback] = await Promise.all([
+      const [links, projects, map, fallback, config, resolveError] = await Promise.all([
         linkedTasks(ctx, companyId),
         paperclipProjects(ctx, companyId),
         readProjectMap(ctx, companyId),
         readFallbackAssignee(ctx, companyId),
+        readConfig(ctx, companyId),
+        ctx.state.get(resolveErrorKey(companyId)),
       ]);
       return {
         configured: true,
+        // Whether a finished task resolves its error in the tracker, and the last failure doing so.
+        resolveWhenDone: config.resolveWhenDone,
+        resolveError: config.resolveWhenDone && typeof resolveError === "string" ? resolveError : null,
         provider: result.provider ?? "Sentry",
         snapshot: result,
         // "" until someone picks who gets errors; the page asks for it first.
@@ -490,6 +567,7 @@ const plugin: PaperclipPlugin = definePlugin({
     ctx.actions.register(ACTION_KEYS.refresh, async (params, actionCtx) => {
       const companyId = asCompanyId(params.companyId, actionCtx.companyId);
       if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
+      await resolveFinished(ctx, companyId);
       const result = await refresh(ctx, companyId, asPeriod(params.period));
       if ("problem" in result) throw new Error(SETUP_MESSAGES[result.problem]);
       return { fetchedAt: result.fetchedAt, ok: result.ok, error: result.error };
@@ -539,7 +617,7 @@ const plugin: PaperclipPlugin = definePlugin({
         companyId,
         projectId,
         title: buildTaskTitle(detail),
-        description: buildTaskDescription(detail, setup.provider.displayName),
+        description: buildTaskDescription(detail, setup.provider.displayName, [], setup.config.resolveWhenDone),
         status: "todo",
         priority,
         assigneeAgentId,
@@ -573,6 +651,11 @@ const plugin: PaperclipPlugin = definePlugin({
           continue;
         }
         if (!config.organization) continue; // Crashdesk is not set up for this company.
+        try {
+          await resolveFinished(ctx, company.id);
+        } catch (err) {
+          ctx.logger.warn("Resolve pass failed", { companyId: company.id, error: String(err) });
+        }
         const cached = await readSnapshot(ctx, company.id, "24h");
         // The cron fires every few minutes; honour the configured interval.
         if (cached && Date.now() - Date.parse(cached.fetchedAt) < config.pollIntervalMinutes * 60_000 * 0.9) continue;
@@ -716,7 +799,7 @@ const plugin: PaperclipPlugin = definePlugin({
           companyId,
           projectId: target.project?.id ?? undefined,
           title: buildTaskTitle(main),
-          description: buildTaskDescription(main, setup.provider.displayName, details.slice(1)),
+          description: buildTaskDescription(main, setup.provider.displayName, details.slice(1), setup.config.resolveWhenDone),
           status: "todo" as const,
           priority: priorityFor(main.issue.level),
           assigneeAgentId: who.assigneeAgentId,

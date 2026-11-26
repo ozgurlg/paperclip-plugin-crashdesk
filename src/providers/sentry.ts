@@ -1,4 +1,5 @@
-// Sentry provider: read-only, needs a token with the `event:read` scope.
+// Sentry provider. Reading needs a token with the `event:read` scope;
+// resolving issues (optional) needs `event:write`.
 // API reference: https://docs.sentry.io/api/events/
 
 import {
@@ -52,19 +53,29 @@ export function createSentryProvider(options: SentryOptions): ErrorProvider {
   const base = normalizeBaseUrl(options.baseUrl);
   const org = encodeURIComponent(options.organization.trim());
 
-  async function get(path: string, params: URLSearchParams): Promise<unknown> {
+  const get = (path: string, params: URLSearchParams) => send("GET", path, params);
+
+  async function send(method: "GET" | "PUT", path: string, params: URLSearchParams, body?: unknown): Promise<unknown> {
     const url = `${base}/api/0/organizations/${org}${path}?${params.toString()}`;
     let response: Response;
     try {
       response = await options.fetch(url, {
-        headers: { Authorization: `Bearer ${options.token}`, Accept: "application/json" },
+        method,
+        headers: {
+          Authorization: `Bearer ${options.token}`,
+          Accept: "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch {
       throw new ProviderError(`Could not reach Sentry at ${base}`, "network");
     }
     if (response.status === 401 || response.status === 403) {
       throw new ProviderError(
-        "Sentry rejected the token. It needs the event:read scope (Issue & Event: Read).",
+        method === "GET"
+          ? "Sentry rejected the token. It needs the event:read scope (Issue & Event: Read)."
+          : "Sentry did not let this token resolve issues. It needs the event:write scope (Issue & Event: Read & Write).",
         "auth",
       );
     }
@@ -120,6 +131,17 @@ export function createSentryProvider(options: SentryOptions): ErrorProvider {
       const issue = parseIssue(rawIssue, period, Date.now());
       const event = Array.isArray(rawEvents) ? rawEvents[0] : undefined;
       return { issue, ...parseEvent(event) };
+    },
+
+    async resolveIssue(issueId) {
+      const path = `/issues/${encodeURIComponent(issueId)}/`;
+      try {
+        await send("PUT", path, new URLSearchParams(), { status: "resolved", statusDetails: { inNextRelease: true } });
+      } catch (err) {
+        // A project that has never sent a release cannot be resolved "in the next release".
+        if (!(err instanceof ProviderError) || err.kind !== "unexpected") throw err;
+        await send("PUT", path, new URLSearchParams(), { status: "resolved" });
+      }
     },
   };
 }

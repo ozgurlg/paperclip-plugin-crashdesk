@@ -20,14 +20,15 @@ Sentry is already great at showing errors. What it cannot do is say "Software En
 
 ## Features
 
-- **Dashboard widget.** How many errors are unresolved, new and without a task, plus the three most frequent ones with their task status, right on the Paperclip dashboard.
+- **Dashboard widget.** A small report on the Paperclip dashboard: unresolved and new errors, users affected, an hourly trend, one line per project showing how many of its errors already have a task, and the most frequent error.
 - **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project, or by what still needs a task. Works on a phone.
 - **Triage with an agent.** One click hands every error without a task to an agent. It groups them by root cause, opens a fix task for each cause worth fixing and skips the noise, so nobody sorts fifty errors by hand.
 - **Create task.** Turn an error into a Paperclip task. With a default assignee chosen, it is one click (priority follows the error level); **⋯** opens Paperclip's own pickers for a one-off change. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
 - **No duplicates.** Each task is linked to its error, so the same error never becomes two open tasks, and the table shows every linked task's live status.
 - **Agent tools.** Agents can call `list-errors` and `get-error` to check on errors themselves, and `create-error-task` to open a fix task for one error or a group with the same root cause.
 - **Native look.** Built on Paperclip's own theme tokens and components. Follows light and dark mode.
-- **Read-only.** Needs one scope, `event:read`. Crashdesk never changes anything in Sentry.
+- **Closes the loop.** Switch on *Resolve fixed errors* and a finished task marks its error as resolved in the next release. The error leaves the list, and Sentry reports it as a regression if the fix did not hold.
+- **Read-only by default.** Needs one scope, `event:read`, and changes nothing in Sentry until you switch on resolving (which needs `event:write`).
 
 ## How a task looks
 
@@ -93,6 +94,7 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 | Sentry URL | no | `https://sentry.io` (US, default), `https://de.sentry.io` (EU), or your self-hosted address. |
 | Auth token | yes | Pick the secret from step 2. Pasted text is rejected on purpose. |
 | Refresh interval | no | Minutes between background syncs. Default 10, at least 5. **Refresh** on the page syncs right away. |
+| Resolve fixed errors in Sentry | no | Off by default. When on, an error is marked resolved in the next release once its task is done. The token then needs Issue & Event: **Read & Write**. |
 
 Settings are per company, so each Paperclip company can connect its own Sentry organization. One token covers every project in the organization: Crashdesk shows them all and the errors page filters by project.
 

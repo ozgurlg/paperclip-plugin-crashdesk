@@ -67,6 +67,12 @@ export interface ErrorProvider {
   readonly displayName: string;
   listIssues(options: ListOptions): Promise<ErrorIssue[]>;
   getIssue(issueId: string, period: ListOptions["period"]): Promise<ErrorIssueDetail>;
+  /**
+   * Marks the issue as fixed in the tracker. Where the tracker knows releases,
+   * "fixed in the next release", so events from older versions do not reopen it.
+   * Absent on trackers that cannot be written to.
+   */
+  resolveIssue?(issueId: string): Promise<void>;
 }
 
 /** An error whose message is safe to show to the operator as-is. */

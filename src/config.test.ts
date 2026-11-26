@@ -8,6 +8,12 @@ test("defaults", () => {
   assert.equal(config.organization, "");
   assert.equal(config.authToken, null);
   assert.equal(config.pollIntervalMinutes, 10);
+  assert.equal(config.resolveWhenDone, false);
+});
+
+test("resolving in the tracker is on only when switched on", () => {
+  assert.equal(parseConfig({ resolveWhenDone: true }).resolveWhenDone, true);
+  assert.equal(parseConfig({ resolveWhenDone: "true" }).resolveWhenDone, false);
 });
 
 test("reads the manifest keys", () => {

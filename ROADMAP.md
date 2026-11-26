@@ -8,7 +8,7 @@ Crashdesk grows in small, working steps. Each version is usable on its own.
 - Background sync of the most frequent unresolved errors, cached per time range (24h, 7d, 14d).
 - Errors page: unresolved, new, users affected and linked-task counts, plus a top-issues table with trend lines.
 - Dashboard widget with the headline numbers, the top three issues and a link to the errors page.
-- **Project mapping** (Settings → Crashdesk projects): link each Sentry project to a Paperclip project once; Create task uses it. Same-name projects are suggested.
+- **Project mapping** (Projects button on the errors page): link each Sentry project to a Paperclip project once; Create task uses it. Same-name projects are suggested.
 - **Create task**: turns an error into a Paperclip task with the error, the innermost stack frames, release and device, and a link back to Sentry. Pick the assignee, project and priority with Paperclip's own pickers.
 - Tasks are linked by origin, so an error is never turned into two open tasks, and the table shows each task's status.
 - Agent tools: `list-errors` and `get-error`.

@@ -8,7 +8,6 @@ import {
   usePluginData,
   type PluginPageProps,
   type PluginSidebarProps,
-  type PluginCompanySettingsPageProps,
   type PluginWidgetProps,
 } from "@paperclipai/plugin-sdk/ui";
 
@@ -55,7 +54,6 @@ type Overview =
     };
 
 const PAGE_PATH = "/crashdesk";
-const SETTINGS_PATH = "/company/settings/crashdesk-projects";
 
 /** Paperclip project of an error: from the saved mapping, or only suggested by a matching name. */
 interface ProjectMatch {
@@ -335,7 +333,7 @@ function CreateTaskForm({
           <span style={{ fontSize: 11 }}>
             {matchedProject.source === "mapping"
               ? `From your project mapping for ${issue.project.slug}`
-              : `Suggested by name. Save it in Settings → Crashdesk projects.`}
+              : `Suggested by name. Save it under Projects at the top of this page.`}
           </span>
         )}
       </label>
@@ -371,7 +369,7 @@ function CreateTaskForm({
 
 export function CrashdeskPage({ context }: PluginPageProps) {
   const companyId = context.companyId;
-  const companyLink = useCompanyLink();
+  const [showMapping, setShowMapping] = useState(false);
   const [period, setPeriod] = useState<Period>("24h");
   const [project, setProject] = useState("all");
   const [openForm, setOpenForm] = useState<string | null>(null);
@@ -426,9 +424,11 @@ export function CrashdeskPage({ context }: PluginPageProps) {
 
       <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, borderBottom: `1px solid ${c.border}`, paddingBottom: 16 }}>
         <h1 style={{ ...sectionTitle, fontSize: 17, flexGrow: 1 }}>App Errors</h1>
-        <a {...companyLink(SETTINGS_PATH)} className="cd-btn" style={{ textDecoration: "none" }}>
-          Project mapping
-        </a>
+        {companyId && (
+          <button type="button" className="cd-btn" onClick={() => setShowMapping(!showMapping)} aria-expanded={showMapping}>
+            Projects
+          </button>
+        )}
         {projects.length > 1 && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: c.mutedFg }}>
             Project
@@ -454,6 +454,10 @@ export function CrashdeskPage({ context }: PluginPageProps) {
           {data?.configured ? `Synced ${timeAgo(data.snapshot.fetchedAt)}` : "Refresh"}
         </button>
       </header>
+
+      {showMapping && companyId && (
+        <ProjectMappingPanel companyId={companyId} onClose={() => setShowMapping(false)} onSaved={refresh} />
+      )}
 
       {refreshError && <Banner tone="error">{refreshError}</Banner>}
       {error && <Banner tone="error">{error.message}</Banner>}
@@ -784,7 +788,7 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Settings → Crashdesk projects: map each Sentry project to a Paperclip project
+// Projects panel on the errors page: map each Sentry project to a Paperclip project
 // ---------------------------------------------------------------------------
 
 interface ProjectMapData {
@@ -793,8 +797,15 @@ interface ProjectMapData {
   paperclipProjects: { id: string; name: string }[];
 }
 
-export function CrashdeskProjectSettings({ context }: PluginCompanySettingsPageProps) {
-  const companyId = context.companyId;
+function ProjectMappingPanel({
+  companyId,
+  onClose,
+  onSaved,
+}: {
+  companyId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { data, loading, error, refresh } = usePluginData<ProjectMapData>("project-map", { companyId });
   const save = usePluginAction("save-project-map");
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
@@ -814,6 +825,7 @@ export function CrashdeskProjectSettings({ context }: PluginCompanySettingsPageP
       await save({ companyId, map: values });
       setDraft(null);
       refresh();
+      onSaved();
       setMessage({ tone: "ok", text: "Saved. Create task now uses these projects." });
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
@@ -823,10 +835,17 @@ export function CrashdeskProjectSettings({ context }: PluginCompanySettingsPageP
   }
 
   return (
-    <div className="cd-root" style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 760 }}>
-      <style>{CSS}</style>
+    <section
+      aria-label="Project mapping"
+      style={{ border: `1px solid ${c.border}`, background: c.card, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Crashdesk projects</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2 style={{ ...sectionTitle, flexGrow: 1 }}>Projects</h2>
+          <button type="button" className="cd-btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
         <p style={{ margin: 0, color: c.mutedFg, lineHeight: 1.5 }}>
           Sentry knows which app each error comes from. Tell Crashdesk which Paperclip project that app belongs to, and
           Create task will put the task there. A project with the same name is suggested until you save.
@@ -901,7 +920,7 @@ export function CrashdeskProjectSettings({ context }: PluginCompanySettingsPageP
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

@@ -2,7 +2,7 @@
 //
 // Sentry knows each error's Sentry project (from the DSN the app sends with).
 // Nothing links a Sentry project to a Paperclip project, so the operator does
-// it once on the "Crashdesk projects" settings page and it is saved per
+// it once in the Projects panel of the errors page and it is saved per
 // company. Until a Sentry project has been mapped, a Paperclip project with
 // the same name is offered as a suggestion: exact match after ignoring case
 // and separators, never a guess, and two candidates means no suggestion.

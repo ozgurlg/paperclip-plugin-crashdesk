@@ -13,8 +13,12 @@ Crashdesk grows in small, working steps. Each version is usable on its own.
 - Agent tools: `list-errors` and `get-error`.
 - Error text reaches agents only inside a labelled, sanitized untrusted-data block.
 
-## v0.2: automation
+## v0.2: projects and automation
 
+- **Settings page with pick lists** instead of typing: choose which Sentry projects and environment to show, from lists loaded from Sentry (needs the token's Project: Read scope).
+- **Project mapping**: link each Sentry project to a Paperclip project and a default assignee, so Create task is one click and the task lands in the right project.
+- **Errors tab on Paperclip projects**: a mapped project shows its own errors on its project page.
+- Per-project rows on the dashboard widget.
 - Rules that open a task by themselves, for example a new error affecting more than N users, or any regression. Off by default.
 - Crash-free session rate per project (needs session data in Sentry), on the page and the dashboard widget.
 

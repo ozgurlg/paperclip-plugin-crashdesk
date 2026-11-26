@@ -97,8 +97,10 @@ async function getProvider(ctx: PluginContext, companyId: string): Promise<Setup
     baseUrl: config.sentryUrl,
     organization: config.organization,
     token: token.token,
-    projects: config.projects,
-    environment: config.environment,
+    // Every project and environment the token can see; filtering by them
+    // comes with the pick-list settings page in v0.2.
+    projects: [],
+    environment: null,
     fetch: (url, init) => ctx.http.fetch(url, init),
   });
   return { provider, config };

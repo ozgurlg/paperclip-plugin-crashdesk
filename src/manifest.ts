@@ -41,8 +41,9 @@ const manifest: PaperclipPluginManifestV1 = {
   },
   // Paperclip stores this schema as Postgres jsonb, which orders keys by
   // length, then alphabetically. The form follows that order, so the key
-  // names are chosen to read top to bottom: org, url, token, projects,
-  // environment, refreshMinutes.
+  // names are chosen to read top to bottom: org, url, token, refreshMinutes.
+  // Project and environment choices will come as pick lists on a custom
+  // settings page (see ROADMAP.md), not as free-text fields.
   instanceConfigSchema: {
     type: "object",
     properties: {
@@ -64,16 +65,6 @@ const manifest: PaperclipPluginManifestV1 = {
         title: "Auth token",
         description:
           "A Sentry token with the event:read scope, stored as a Paperclip secret. In Sentry: Settings → Developer Settings → Custom Integrations → New Internal Integration, Issue & Event: Read.",
-      },
-      projects: {
-        type: "string",
-        title: "Projects (optional)",
-        description: "Comma-separated project slugs. Empty means every project the token can see.",
-      },
-      environment: {
-        type: "string",
-        title: "Environment (optional)",
-        description: "Only show errors from this environment, e.g. production.",
       },
       refreshMinutes: {
         type: "number",

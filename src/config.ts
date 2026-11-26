@@ -5,8 +5,6 @@ export interface CrashdeskConfig {
   sentryUrl: string;
   organization: string;
   authToken: string | EnvSecretRefBinding | null;
-  projects: string[];
-  environment: string | null;
   pollIntervalMinutes: number;
 }
 
@@ -15,8 +13,6 @@ export const CONFIG_KEYS = {
   organization: "org",
   url: "url",
   token: "token",
-  projects: "projects",
-  environment: "environment",
   refreshMinutes: "refreshMinutes",
 } as const;
 
@@ -24,12 +20,6 @@ const MIN_REFRESH_MINUTES = 5; // the sync job runs every 5 minutes
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-/** Accepts an array or a comma/space separated string, so either form works in the settings form. */
-export function parseProjects(value: unknown): string[] {
-  const items = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,\s]+/) : [];
-  return [...new Set(items.map(text).filter((slug) => slug.length > 0))];
 }
 
 export function parseConfig(raw: Record<string, unknown>): CrashdeskConfig {
@@ -41,8 +31,6 @@ export function parseConfig(raw: Record<string, unknown>): CrashdeskConfig {
       typeof token === "string" || (token !== null && typeof token === "object")
         ? (token as string | EnvSecretRefBinding)
         : null,
-    projects: parseProjects(raw[CONFIG_KEYS.projects]),
-    environment: text(raw[CONFIG_KEYS.environment]) || null,
     pollIntervalMinutes: refreshMinutes(raw[CONFIG_KEYS.refreshMinutes]),
   };
 }

@@ -1,27 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseConfig, parseProjects } from "./config.ts";
+import { parseConfig } from "./config.ts";
 
 test("defaults", () => {
   const config = parseConfig({});
   assert.equal(config.sentryUrl, "https://sentry.io");
   assert.equal(config.organization, "");
   assert.equal(config.authToken, null);
-  assert.deepEqual(config.projects, []);
-  assert.equal(config.environment, null);
   assert.equal(config.pollIntervalMinutes, 10);
 });
 
 test("reads the manifest keys", () => {
-  const config = parseConfig({ org: " acme ", url: "https://de.sentry.io", environment: "production" });
+  const config = parseConfig({ org: " acme ", url: "https://de.sentry.io" });
   assert.equal(config.organization, "acme");
   assert.equal(config.sentryUrl, "https://de.sentry.io");
-  assert.equal(config.environment, "production");
-});
-
-test("projects accept a list or a comma-separated string", () => {
-  assert.deepEqual(parseProjects("shop-app, blog,,shop-app"), ["shop-app", "blog"]);
-  assert.deepEqual(parseProjects(["a", " b ", 3]), ["a", "b"]);
 });
 
 test("refresh interval defaults to 10 and stays within 5..1440", () => {

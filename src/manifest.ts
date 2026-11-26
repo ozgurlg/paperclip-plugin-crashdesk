@@ -33,6 +33,7 @@ const manifest: PaperclipPluginManifestV1 = {
     "instance.settings.register",
     "ui.page.register",
     "ui.sidebar.register",
+    "ui.dashboardWidget.register",
   ],
   entrypoints: {
     worker: "./dist/worker.js",
@@ -126,6 +127,12 @@ const manifest: PaperclipPluginManifestV1 = {
         id: SLOT_IDS.sidebar,
         displayName: "Crashdesk",
         exportName: EXPORT_NAMES.sidebar,
+      },
+      {
+        type: "dashboardWidget",
+        id: SLOT_IDS.dashboardWidget,
+        displayName: "App Errors",
+        exportName: EXPORT_NAMES.dashboardWidget,
       },
     ],
   },

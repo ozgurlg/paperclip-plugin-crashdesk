@@ -8,11 +8,13 @@ export const ORIGIN_KIND = `plugin:${PLUGIN_ID}:error` as const;
 export const SLOT_IDS = {
   page: "crashdesk-page",
   sidebar: "crashdesk-sidebar",
+  dashboardWidget: "crashdesk-dashboard-widget",
 } as const;
 
 export const EXPORT_NAMES = {
   page: "CrashdeskPage",
   sidebar: "CrashdeskSidebarLink",
+  dashboardWidget: "CrashdeskDashboardWidget",
 } as const;
 
 export const JOB_KEYS = {

@@ -7,6 +7,7 @@ import {
   usePluginData,
   type PluginPageProps,
   type PluginSidebarProps,
+  type PluginWidgetProps,
 } from "@paperclipai/plugin-sdk/ui";
 
 // ---------------------------------------------------------------------------
@@ -585,6 +586,127 @@ function SetupCard({ message }: { message: string }) {
         <li>Open Instance settings → Plugins → Crashdesk, enter your organization slug and pick the secret.</li>
       </ol>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard widget: headline numbers, the top issues, and the way in
+// ---------------------------------------------------------------------------
+
+export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
+  const nav = useHostNavigation();
+  const { data, loading, error, refresh } = usePluginData<Overview>("overview", {
+    companyId: context.companyId,
+    period: "24h",
+  });
+  const runRefresh = usePluginAction("refresh");
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function syncNow() {
+    setRefreshing(true);
+    try {
+      await runRefresh({ period: "24h" });
+      refresh();
+    } catch {
+      // The page shows refresh errors in full; the widget keeps the last data.
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  const issues = data?.configured ? data.snapshot.issues : [];
+  const links = data?.configured ? data.links : {};
+  const top = issues.slice(0, 3);
+  const numbers = [
+    { label: "unresolved", value: issues.length },
+    { label: "new", value: issues.filter((i) => i.isNew).length },
+    { label: "users affected", value: issues.reduce((sum, i) => sum + i.users, 0) },
+  ];
+
+  return (
+    <div className="cd-root" style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px" }}>
+      <style>{CSS + "@keyframes cd-spin { to { transform: rotate(360deg); } }"}</style>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ color: c.mutedFg, display: "flex" }}>
+          <BugIcon size={16} />
+        </span>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, flexGrow: 1 }}>App Errors</h2>
+        <span style={{ fontSize: 12, color: c.mutedFg }}>
+          {data?.configured ? `Last 24h · ${timeAgo(data.snapshot.fetchedAt)}` : ""}
+        </span>
+        {data?.configured && (
+          <button
+            type="button"
+            onClick={() => void syncNow()}
+            disabled={refreshing}
+            aria-label="Refresh errors"
+            style={{ display: "flex", padding: 6, background: "transparent", border: 0, color: c.mutedFg, cursor: "pointer" }}
+          >
+            <RefreshIcon spinning={refreshing} />
+          </button>
+        )}
+      </div>
+
+      {loading && !data && <p style={{ margin: 0, fontSize: 13, color: c.mutedFg }}>Loading errors…</p>}
+      {error && <p style={{ margin: 0, fontSize: 13, color: c.destructive }}>{error.message}</p>}
+
+      {data && !data.configured && (
+        <p style={{ margin: 0, fontSize: 13, color: c.mutedFg, lineHeight: 1.5 }}>
+          Connect Sentry to see your app errors here and turn them into tasks.
+        </p>
+      )}
+
+      {data?.configured && (
+        <>
+          {!data.snapshot.ok && (
+            <p style={{ margin: 0, fontSize: 12, color: c.destructive }}>Last sync failed. Showing the last list that loaded.</p>
+          )}
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+            {numbers.map((n) => (
+              <div key={n.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{fmt(n.value)}</span>
+                <span style={{ fontSize: 12, color: c.mutedFg }}>{n.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {top.length === 0 ? (
+            <p style={{ margin: 0, fontSize: 13, color: c.mutedFg }}>No unresolved errors in the last 24 hours.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: `1px solid ${c.border}`, paddingTop: 12 }}>
+              <span style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: c.mutedFg }}>Top issues</span>
+              {top.map((issue) => {
+                const link = links[issue.id];
+                return (
+                  <div key={issue.id} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <span style={{ marginTop: 5 }}>
+                      <Dot color={LEVEL_COLOR[issue.level]} label={issue.level} />
+                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flexGrow: 1 }}>
+                      <span
+                        title={issue.title}
+                        style={{ fontFamily: c.mono, fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                      >
+                        {issue.title}
+                      </span>
+                      <span style={{ fontSize: 12, color: c.mutedFg }}>
+                        {issue.project.name} · {fmt(issue.events)} events · {fmt(issue.users)} users
+                        {link ? ` · ${link.identifier ?? "task"} ${link.status.replace("_", " ")}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      <a {...nav.linkProps(PAGE_PATH)} className="cd-link" style={{ fontSize: 13, color: c.mutedFg, alignSelf: "flex-start" }}>
+        {data && !data.configured ? "Set up Crashdesk →" : "Open Crashdesk →"}
+      </a>
+    </div>
   );
 }
 

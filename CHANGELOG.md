@@ -15,4 +15,5 @@ All notable changes to this project are documented here. The format follows
 - Create task: turns an error into a Paperclip task with assignee, project and priority.
 - Task linking by origin, with the linked task's status shown next to each error.
 - Agent tools `list-errors` and `get-error`.
+- Dashboard widget with the headline numbers, the top three issues and a link to the errors page.
 - Sidebar entry and background sync job.

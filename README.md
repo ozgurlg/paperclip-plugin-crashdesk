@@ -20,6 +20,7 @@ Sentry is already great at showing errors. What it cannot do is say "Software En
 
 ## Features
 
+- **Dashboard widget.** The day's headline numbers and the three most frequent errors, right on the Paperclip dashboard.
 - **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project.
 - **Create task.** Turn an error into a Paperclip task. Choose the assignee, project and priority with Paperclip's own pickers. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
 - **No duplicates.** Each task is linked to its error, so the same error never becomes two open tasks, and the table shows every linked task's live status.
@@ -94,7 +95,7 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 | Environment | no | Only show one environment, e.g. `production`. |
 | Refresh interval | no | Minutes between background syncs. Default 10. |
 
-Open **Crashdesk** in the sidebar. The first sync runs right away.
+The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (or `/<company-prefix>/crashdesk`) opens the full errors page. The first sync runs right away.
 
 > **Self-hosted Sentry on a private network?** Paperclip blocks plugin requests to private IP addresses (protection against SSRF), so Crashdesk can only reach a Sentry that has a public address.
 
@@ -139,7 +140,7 @@ The code is small on purpose:
 | `src/providers/sentry.ts` | Sentry API calls and parsing. |
 | `src/task.ts` | Builds the Paperclip task and sanitizes error text. |
 | `src/worker.ts` | Sync job, data, actions and agent tools. |
-| `src/ui/index.tsx` | The errors page and sidebar entry. |
+| `src/ui/index.tsx` | The errors page, dashboard widget and sidebar entry. |
 
 Contributions are welcome. Please open an issue before a large change.
 

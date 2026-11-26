@@ -7,6 +7,7 @@ Crashdesk grows in small, working steps. Each version is usable on its own.
 - Sentry provider, read-only (`event:read`). sentry.io, the EU region and self-hosted Sentry.
 - Background sync of the most frequent unresolved errors, cached per time range (24h, 7d, 14d).
 - Errors page: unresolved, new, users affected and linked-task counts, plus a top-issues table with trend lines.
+- Dashboard widget with the headline numbers, the top three issues and a link to the errors page.
 - **Create task**: turns an error into a Paperclip task with the error, the innermost stack frames, release and device, and a link back to Sentry. Pick the assignee, project and priority with Paperclip's own pickers.
 - Tasks are linked by origin, so an error is never turned into two open tasks, and the table shows each task's status.
 - Agent tools: `list-errors` and `get-error`.
@@ -15,8 +16,7 @@ Crashdesk grows in small, working steps. Each version is usable on its own.
 ## v0.2: automation
 
 - Rules that open a task by themselves, for example a new error affecting more than N users, or any regression. Off by default.
-- Crash-free session rate per project (needs session data in Sentry).
-- Dashboard widget with the headline numbers.
+- Crash-free session rate per project (needs session data in Sentry), on the page and the dashboard widget.
 
 ## v0.3: reach
 

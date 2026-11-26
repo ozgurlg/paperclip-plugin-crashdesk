@@ -12,6 +12,7 @@ import { ACTION_KEYS, DATA_KEYS, DEFAULTS, JOB_KEYS, ORIGIN_KIND, PERIODS, TOOL_
 import { createSentryProvider } from "./providers/sentry.ts";
 import { ProviderError, type ErrorIssue, type ErrorProvider } from "./providers/types.ts";
 import { buildTaskDescription, buildTaskTitle, originIdFor, sanitize } from "./task.ts";
+import { matchProject, type NamedProject } from "./match.ts";
 
 // Paperclip keeps plugin settings per company, so everything here is scoped
 // to a company: its settings, its cached error lists and its tasks. Calls from
@@ -206,6 +207,17 @@ async function linkedTasks(ctx: PluginContext, companyId: string): Promise<Recor
   return links;
 }
 
+async function paperclipProjects(ctx: PluginContext, companyId: string): Promise<NamedProject[]> {
+  try {
+    const projects = await ctx.projects.list({ companyId, limit: 200 });
+    return projects.map((p) => ({ id: p.id, name: p.name }));
+  } catch (err) {
+    // Matching is a convenience; without it the user just picks the project.
+    ctx.logger.warn("Could not list Paperclip projects", { companyId, error: String(err) });
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -218,16 +230,22 @@ const plugin: PaperclipPlugin = definePlugin({
       const period = asPeriod(params.period);
       const result = await freshSnapshot(ctx, companyId, period);
       if ("problem" in result) return { configured: false, setupMessage: SETUP_MESSAGES[result.problem] };
-      const links = await linkedTasks(ctx, companyId);
+      const [links, projects] = await Promise.all([linkedTasks(ctx, companyId), paperclipProjects(ctx, companyId)]);
       return {
         configured: true,
         provider: "Sentry",
         snapshot: result,
-        // Keyed by provider issue id for the UI.
+        // Both keyed by provider issue id for the UI.
         links: Object.fromEntries(
           result.issues.flatMap((issue) => {
             const link = links[originIdFor("sentry", issue.id)];
             return link ? [[issue.id, link]] : [];
+          }),
+        ),
+        projectMatches: Object.fromEntries(
+          result.issues.flatMap((issue) => {
+            const match = matchProject(issue.project, projects);
+            return match ? [[issue.id, match]] : [];
           }),
         ),
       };
@@ -272,7 +290,12 @@ const plugin: PaperclipPlugin = definePlugin({
             : "medium";
       const assigneeAgentId = asCompanyId(params.assigneeAgentId) ?? undefined;
       const assigneeUserId = asCompanyId(params.assigneeUserId) ?? undefined;
-      const projectId = asCompanyId(params.projectId) ?? undefined;
+      // An explicit choice (even "no project", sent as "") wins; callers that
+      // send nothing get the Paperclip project with the same name, if any.
+      const projectId =
+        params.projectId === undefined
+          ? (matchProject(detail.issue.project, await paperclipProjects(ctx, companyId))?.id ?? undefined)
+          : (asCompanyId(params.projectId) ?? undefined);
 
       const task = await ctx.issues.create({
         companyId,

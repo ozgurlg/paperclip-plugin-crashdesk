@@ -49,6 +49,8 @@ type Overview =
       provider: string;
       snapshot: { period: Period; fetchedAt: string; ok: boolean; error: string | null; issues: ErrorIssue[] };
       links: Record<string, LinkedTask>;
+      /** Paperclip project with the same name as the error's Sentry project, keyed by issue id. */
+      projectMatches?: Record<string, { id: string; name: string }>;
     };
 
 const PAGE_PATH = "/crashdesk";
@@ -264,18 +266,21 @@ function TaskChip({ task }: { task: LinkedTask }) {
 function CreateTaskForm({
   companyId,
   issue,
+  matchedProject,
   onDone,
   onCancel,
 }: {
   companyId: string;
   issue: ErrorIssue;
+  matchedProject: { id: string; name: string } | undefined;
   onDone: () => void;
   onCancel: () => void;
 }) {
   const createTask = usePluginAction("create-task");
   const [assignee, setAssignee] = useState("");
   const [assigneeIds, setAssigneeIds] = useState<{ agent: string | null; user: string | null }>({ agent: null, user: null });
-  const [projectId, setProjectId] = useState("");
+  // Start with the Paperclip project that has the same name as the Sentry project.
+  const [projectId, setProjectId] = useState(matchedProject?.id ?? "");
   const [priority, setPriority] = useState(issue.level === "fatal" ? "critical" : issue.level === "error" ? "high" : "medium");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -317,6 +322,9 @@ function CreateTaskForm({
       <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg, minWidth: 200 }}>
         Project
         <ProjectPicker companyId={companyId} value={projectId} onChange={setProjectId} placeholder="No project" noneLabel="No project" />
+        {matchedProject && projectId === matchedProject.id && (
+          <span style={{ fontSize: 11 }}>Matched by name to Sentry project {issue.project.slug}</span>
+        )}
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg }}>
         Priority
@@ -514,6 +522,7 @@ export function CrashdeskPage({ context }: PluginPageProps) {
                               <CreateTaskForm
                                 companyId={companyId}
                                 issue={issue}
+                                matchedProject={data.projectMatches?.[issue.id]}
                                 onCancel={() => setOpenForm(null)}
                                 onDone={() => {
                                   setOpenForm(null);

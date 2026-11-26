@@ -22,6 +22,7 @@ const manifest: PaperclipPluginManifestV1 = {
   categories: ["ui", "automation"],
   capabilities: [
     "companies.read",
+    "projects.read",
     "issues.read",
     "issues.create",
     "plugin.state.read",

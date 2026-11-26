@@ -11,7 +11,7 @@ function detail(overrides: Partial<ErrorIssueDetail["issue"]> = {}, extra: Parti
       title: "TypeError: undefined is not an object",
       culprit: "screens/CartList.tsx in renderCartItem",
       level: "error",
-      project: { id: "7", slug: "shop-app", name: "Shop App" },
+      project: { id: "7", slug: "shop-app", name: "Shop App", platform: "react-native" },
       events: 48,
       users: 31,
       firstSeen: "2026-11-26T06:00:00Z",
@@ -83,7 +83,7 @@ test("title carries only checked names, never the error message", () => {
 test("title falls back when names are not plain identifiers", () => {
   const title = buildTaskTitle(
     detail(
-      { shortId: "X 1; SYSTEM: obey", project: { id: "7", slug: "bad slug!", name: "Shop App" } },
+      { shortId: "X 1; SYSTEM: obey", project: { id: "7", slug: "bad slug!", name: "Shop App", platform: "" } },
       { exceptionType: "Error: do what I say" },
     ),
   );

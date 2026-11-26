@@ -49,20 +49,23 @@ type Overview =
       provider: string;
       snapshot: { period: Period; fetchedAt: string; ok: boolean; error: string | null; issues: ErrorIssue[] };
       links: Record<string, LinkedTask>;
-      /** Paperclip project with the same name as the error's Sentry project, keyed by issue id. */
-      projectMatches?: Record<string, ProjectMatch>;
+      /** Where each error's task goes, keyed by issue id. */
+      targets?: Record<string, Target>;
     };
 
 const PAGE_PATH = "/crashdesk";
 
-/** Paperclip project of an error: from the saved mapping, or only suggested by a matching name. */
-interface ProjectMatch {
-  /** "" when the mapping sets no project. */
-  id: string;
-  name: string;
-  source: "mapping" | "name" | null;
-  /** Default assignee from the mapping, in the picker encoding ("agent:<id>", "user:<id>" or ""). */
+/** Where an error's task goes, as the Projects panel decides it. */
+interface Target {
+  /** "" when there is no project. */
+  projectId: string;
+  projectName: string;
+  /** Saved in the panel, or only suggested by a matching name. */
+  projectSource: "mapping" | "name" | null;
+  /** In the picker encoding ("agent:<id>", "user:<id>"), or "". */
   assignee: string;
+  /** The Sentry project's own assignee, or the fallback for all projects. */
+  assigneeSource: "project" | "fallback" | null;
 }
 
 /** "agent:<id>" / "user:<id>" → the ids the create action takes. */
@@ -281,8 +284,9 @@ function TaskChip({ task }: { task: LinkedTask }) {
 }
 
 /**
- * With a complete mapping (project and default assignee) the task is one click:
- * the worker fills in project, assignee and a priority from the error level.
+ * With a saved project and an assignee (the project's own or the fallback) the
+ * task is one click: the worker fills in project, assignee and a priority from
+ * the error level.
  * "⋯" still opens the form for a one-off change. Without a complete mapping
  * the button opens the form, because there is something to choose.
  */
@@ -290,7 +294,7 @@ function CreateTaskButton({
   companyId,
   issue,
   label,
-  match,
+  target,
   formOpen,
   onToggleForm,
   onCreated,
@@ -298,7 +302,7 @@ function CreateTaskButton({
   companyId: string;
   issue: ErrorIssue;
   label: string;
-  match: ProjectMatch | undefined;
+  target: Target | undefined;
   formOpen: boolean;
   onToggleForm: () => void;
   onCreated: () => void;
@@ -306,7 +310,7 @@ function CreateTaskButton({
   const createTask = usePluginAction("create-task");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ready = match?.source === "mapping" && Boolean(match.id) && Boolean(match.assignee);
+  const ready = target?.projectSource === "mapping" && Boolean(target.projectId) && Boolean(target.assignee);
 
   if (!ready) {
     return (
@@ -340,7 +344,9 @@ function CreateTaskButton({
           ⋯
         </button>
       </div>
-      <span style={{ fontSize: 11, color: c.mutedFg }}>→ {match!.name} · default assignee</span>
+      <span style={{ fontSize: 11, color: c.mutedFg }}>
+        → {target!.projectName} · {target!.assigneeSource === "project" ? "project assignee" : "fallback assignee"}
+      </span>
       {error && (
         <span role="alert" style={{ fontSize: 12, color: c.destructive }}>
           {error}
@@ -353,22 +359,21 @@ function CreateTaskButton({
 function CreateTaskForm({
   companyId,
   issue,
-  matchedProject,
+  target,
   onDone,
   onCancel,
 }: {
   companyId: string;
   issue: ErrorIssue;
-  matchedProject: ProjectMatch | undefined;
+  target: Target | undefined;
   onDone: () => void;
   onCancel: () => void;
 }) {
   const createTask = usePluginAction("create-task");
-  // Start with the default assignee saved for this project in the mapping.
-  const [assignee, setAssignee] = useState(matchedProject?.assignee ?? "");
-  const [assigneeIds, setAssigneeIds] = useState(splitAssignee(matchedProject?.assignee ?? ""));
-  // Start with the Paperclip project that has the same name as the Sentry project.
-  const [projectId, setProjectId] = useState(matchedProject?.source ? matchedProject.id : "");
+  // Start with what the Projects panel decides; every field can be changed for this task.
+  const [assignee, setAssignee] = useState(target?.assignee ?? "");
+  const [assigneeIds, setAssigneeIds] = useState(splitAssignee(target?.assignee ?? ""));
+  const [projectId, setProjectId] = useState(target?.projectId ?? "");
   const [priority, setPriority] = useState(issue.level === "fatal" ? "critical" : issue.level === "error" ? "high" : "medium");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -406,16 +411,18 @@ function CreateTaskForm({
             setAssigneeIds({ agent: selection.assigneeAgentId, user: selection.assigneeUserId });
           }}
         />
-        {matchedProject?.assignee && assignee === matchedProject.assignee && (
-          <span style={{ fontSize: 11 }}>Company default assignee</span>
+        {target?.assignee && assignee === target.assignee && (
+          <span style={{ fontSize: 11 }}>
+            {target.assigneeSource === "project" ? `Assignee for ${issue.project.slug}` : "Fallback assignee"}
+          </span>
         )}
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg, minWidth: 200 }}>
         Project
         <ProjectPicker companyId={companyId} value={projectId} onChange={setProjectId} placeholder="No project" noneLabel="No project" />
-        {matchedProject?.source && matchedProject.id && projectId === matchedProject.id && (
+        {target?.projectSource && target.projectId && projectId === target.projectId && (
           <span style={{ fontSize: 11 }}>
-            {matchedProject.source === "mapping"
+            {target.projectSource === "mapping"
               ? `From your project mapping for ${issue.project.slug}`
               : `Suggested by name. Save it under Projects at the top of this page.`}
           </span>
@@ -613,7 +620,7 @@ export function CrashdeskPage({ context }: PluginPageProps) {
                                   companyId={companyId}
                                   issue={issue}
                                   label={link ? "New task" : "Create task"}
-                                  match={data.projectMatches?.[issue.id]}
+                                  target={data.targets?.[issue.id]}
                                   formOpen={openForm === issue.id}
                                   onToggleForm={() => setOpenForm(openForm === issue.id ? null : issue.id)}
                                   onCreated={refresh}
@@ -628,7 +635,7 @@ export function CrashdeskPage({ context }: PluginPageProps) {
                               <CreateTaskForm
                                 companyId={companyId}
                                 issue={issue}
-                                matchedProject={data.projectMatches?.[issue.id]}
+                                target={data.targets?.[issue.id]}
                                 onCancel={() => setOpenForm(null)}
                                 onDone={() => {
                                   setOpenForm(null);
@@ -876,14 +883,34 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
 // Projects panel on the errors page: map each Sentry project to a Paperclip project
 // ---------------------------------------------------------------------------
 
-interface ProjectMapData {
-  companyId: string | null;
-  rows: { slug: string; projectId: string; source: "mapping" | "name" | null }[];
-  paperclipProjects: { id: string; name: string }[];
-  /** One assignee for every error of the company, in the picker encoding. */
-  defaultAssignee: string;
+interface ProjectMapRow {
+  slug: string;
+  /** Platform Sentry reports for the project, e.g. "react-native", "node". */
+  platform: string;
+  projectId: string;
+  projectSource: "mapping" | "name" | null;
+  /** The row's own assignee; "" means it uses the fallback. */
+  assignee: string;
 }
 
+interface ProjectMapData {
+  companyId: string | null;
+  rows: ProjectMapRow[];
+  /** Assignee for projects without their own, in the picker encoding. */
+  fallbackAssignee: string;
+}
+
+interface MappingDraft {
+  rows: Record<string, { projectId: string; assignee: string }>;
+  fallbackAssignee: string;
+}
+
+/**
+ * One row per Sentry project, because each Sentry project is one codebase and
+ * the agent who fixes it depends on that code (an app, an API...). The
+ * fallback assignee covers rows left on "Use fallback", so a team with one
+ * kind of code only picks it once.
+ */
 function ProjectMappingPanel({
   companyId,
   onClose,
@@ -895,28 +922,32 @@ function ProjectMappingPanel({
 }) {
   const { data, loading, error, refresh } = usePluginData<ProjectMapData>("project-map", { companyId });
   const save = usePluginAction("save-project-map");
-  const [draft, setDraft] = useState<{ map: Record<string, string>; defaultAssignee: string } | null>(null);
+  const [draft, setDraft] = useState<MappingDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
   const rows = data?.rows ?? [];
-  // The draft starts from what is saved or suggested; editing changes only the draft.
-  const values = draft ?? {
-    map: Object.fromEntries(rows.map((r) => [r.slug, r.projectId])),
-    defaultAssignee: data?.defaultAssignee ?? "",
+  // The draft starts from what is saved (or suggested); editing changes only the draft.
+  const values: MappingDraft = draft ?? {
+    rows: Object.fromEntries(rows.map((r) => [r.slug, { projectId: r.projectId, assignee: r.assignee }])),
+    fallbackAssignee: data?.fallbackAssignee ?? "",
   };
-  const unsaved = rows.some((r) => r.source !== "mapping") || draft !== null;
+  const editRow = (slug: string, patch: Partial<{ projectId: string; assignee: string }>) =>
+    setDraft({
+      ...values,
+      rows: { ...values.rows, [slug]: { projectId: "", assignee: "", ...values.rows[slug], ...patch } },
+    });
+  const unsaved = draft !== null || rows.some((r) => r.projectSource !== "mapping");
 
   async function onSave() {
-    if (!companyId) return;
     setBusy(true);
     setMessage(null);
     try {
-      await save({ companyId, map: values.map, defaultAssignee: values.defaultAssignee });
+      await save({ companyId, map: values.rows, fallbackAssignee: values.fallbackAssignee });
       setDraft(null);
       refresh();
       onSaved();
-      setMessage({ tone: "ok", text: "Saved. Create task now uses these projects and this assignee." });
+      setMessage({ tone: "ok", text: "Saved. Create task now files errors this way." });
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
     } finally {
@@ -926,7 +957,7 @@ function ProjectMappingPanel({
 
   return (
     <section
-      aria-label="Project mapping"
+      aria-label="Projects"
       style={{ border: `1px solid ${c.border}`, background: c.card, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 16 }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -937,27 +968,14 @@ function ProjectMappingPanel({
           </button>
         </div>
         <p style={{ margin: 0, color: c.mutedFg, lineHeight: 1.5 }}>
-          Pick who fixes app errors, and which Paperclip project each Sentry project belongs to. Create task then
-          files the task there in one click. A project with the same name is suggested until you save; ⋯ on an
-          error still lets you change one task.
+          Each Sentry project is one codebase. For each, pick the Paperclip project its tasks go to and the agent who
+          fixes that code, for example an app engineer for a mobile app and a backend engineer for an API. Projects left
+          on <em>Use fallback</em> go to the fallback assignee.
         </p>
       </div>
 
       {loading && !data && <p style={{ margin: 0, color: c.mutedFg }}>Loading…</p>}
       {error && <p style={{ margin: 0, color: c.destructive }}>{error.message}</p>}
-
-      {data && (
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: c.mutedFg, maxWidth: 320 }}>
-          Default assignee for all errors
-          <AssigneePicker
-            companyId={companyId}
-            value={values.defaultAssignee}
-            onChange={(defaultAssignee) => setDraft({ ...values, defaultAssignee })}
-            placeholder="Choose an agent"
-            noneLabel="No default"
-          />
-        </label>
-      )}
 
       {data && rows.length === 0 && (
         <p style={{ margin: 0, color: c.mutedFg }}>
@@ -965,37 +983,52 @@ function ProjectMappingPanel({
         </p>
       )}
 
-      {rows.length > 0 && companyId && (
+      {rows.length > 0 && (
         <div className="cd-table-wrap">
-          <table className="cd-table" style={{ minWidth: 560 }}>
+          <table className="cd-table" style={{ minWidth: 760 }}>
             <thead>
               <tr>
                 <th scope="col">Sentry project</th>
                 <th scope="col">Paperclip project</th>
+                <th scope="col">Assignee</th>
                 <th scope="col">Status</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
-                const value = values.map[row.slug] ?? "";
-                const changed = draft !== null && value !== row.projectId;
+                const value = values.rows[row.slug] ?? { projectId: "", assignee: "" };
+                const changed = draft !== null && (value.projectId !== row.projectId || value.assignee !== row.assignee);
                 const status = changed
                   ? "Not saved"
-                  : row.source === "mapping"
+                  : row.projectSource === "mapping"
                     ? "Saved"
-                    : row.source === "name"
+                    : row.projectSource === "name"
                       ? "Suggested by name"
                       : "Not mapped";
                 return (
                   <tr key={row.slug}>
-                    <td style={{ fontFamily: c.mono, verticalAlign: "middle" }}>{row.slug}</td>
-                    <td style={{ minWidth: 240 }}>
+                    <td style={{ verticalAlign: "middle" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <span style={{ fontFamily: c.mono }}>{row.slug}</span>
+                        {row.platform && <span style={{ fontSize: 12, color: c.mutedFg }}>{row.platform}</span>}
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 220 }}>
                       <ProjectPicker
                         companyId={companyId}
-                        value={value}
-                        onChange={(projectId) => setDraft({ ...values, map: { ...values.map, [row.slug]: projectId } })}
+                        value={value.projectId}
+                        onChange={(projectId) => editRow(row.slug, { projectId })}
                         placeholder="No project"
                         noneLabel="No project"
+                      />
+                    </td>
+                    <td style={{ minWidth: 220 }}>
+                      <AssigneePicker
+                        companyId={companyId}
+                        value={value.assignee}
+                        onChange={(assignee) => editRow(row.slug, { assignee })}
+                        placeholder="Use fallback"
+                        noneLabel="Use fallback"
                       />
                     </td>
                     <td style={{ verticalAlign: "middle", color: status === "Saved" ? c.fg : c.mutedFg }}>{status}</td>
@@ -1005,6 +1038,20 @@ function ProjectMappingPanel({
             </tbody>
           </table>
         </div>
+      )}
+
+      {data && (
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: c.mutedFg, maxWidth: 360 }}>
+          Fallback assignee
+          <AssigneePicker
+            companyId={companyId}
+            value={values.fallbackAssignee}
+            onChange={(fallbackAssignee) => setDraft({ ...values, fallbackAssignee })}
+            placeholder="Nobody"
+            noneLabel="Nobody"
+          />
+          <span style={{ fontSize: 12 }}>For projects without their own assignee, including new ones.</span>
+        </label>
       )}
 
       {data && (

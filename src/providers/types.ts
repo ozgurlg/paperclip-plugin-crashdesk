@@ -8,6 +8,8 @@ export interface ErrorProject {
   id: string;
   slug: string;
   name: string;
+  /** The project's platform as the tracker reports it, e.g. "react-native", "node"; "" when unknown. */
+  platform: string;
 }
 
 export interface ErrorIssue {

@@ -95,7 +95,7 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 
 Settings are per company, so each Paperclip company can connect its own Sentry organization. One token covers every project in the organization: Crashdesk shows them all and the errors page filters by project.
 
-4. **Map projects.** On the errors page, press **Projects**. Each Sentry project that has errors gets a row: pick the Paperclip project its tasks belong to. At the top, pick the default assignee for all errors (usually the agent who fixes app code), then press **Save**. A Paperclip project with the same name is suggested until you save. Sentry and Paperclip know nothing about each other, so this is the one place that links them.
+4. **Map projects.** On the errors page, press **Projects**. Each Sentry project is one codebase and gets a row: pick the Paperclip project its tasks go to and the agent who fixes that code (say, an app engineer for a mobile app and a backend engineer for an API). Rows left on *Use fallback* go to the **fallback assignee**, which also catches new Sentry projects. A Paperclip project with the same name is suggested until you save. Sentry and Paperclip know nothing about each other, so this is the one place that links them.
 
 The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (or `/<company-prefix>/crashdesk`) opens the full errors page. The first sync runs right away.
 

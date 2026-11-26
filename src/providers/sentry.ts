@@ -159,7 +159,12 @@ export function parseIssue(raw: unknown, period: ListOptions["period"], now: num
     culprit: str(o.culprit),
     level: LEVELS.includes(level) ? level : "error",
     // Sentry's own UI labels projects by slug; the name field is often a leftover platform name.
-    project: { id: str(project.id), slug: str(project.slug), name: str(project.slug) || str(project.name) },
+    project: {
+      id: str(project.id),
+      slug: str(project.slug),
+      name: str(project.slug) || str(project.name),
+      platform: str(project.platform) || str(o.platform),
+    },
     events: num(o.count),
     users: num(o.userCount),
     firstSeen,

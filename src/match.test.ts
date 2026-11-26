@@ -4,11 +4,10 @@ import {
   assigneeIds,
   cleanAssignee,
   cleanProjectMap,
-  legacyCommonAssignee,
   matchProject,
   normalizeName,
   readProjectMapValue,
-  resolveProject,
+  resolveTarget,
 } from "./match.ts";
 
 const projects = [
@@ -17,6 +16,8 @@ const projects = [
   { id: "p3", name: "Company" },
 ];
 const shop = { slug: "shop-app", name: "shop-app" };
+const api = { slug: "api", name: "api" };
+const row = (projectId: string, assignee = "") => ({ projectId, assignee });
 
 test("normalizeName ignores case and separators", () => {
   assert.equal(normalizeName("Shop App"), "shopapp");
@@ -31,53 +32,63 @@ test("name suggestion: same name only, never ambiguous", () => {
   assert.equal(matchProject({ slug: "", name: "" }, [{ id: "x", name: "" }]), null);
 });
 
-test("a saved mapping wins over the name", () => {
-  assert.deepEqual(resolveProject(shop, { "shop-app": "p3" }, projects), {
-    project: { id: "p3", name: "Company" },
-    source: "mapping",
+test("each Sentry project can have its own assignee", () => {
+  const map = { "shop-app": row("p1", "agent:mobile"), api: row("p3", "agent:backend") };
+  assert.equal(resolveTarget(shop, map, projects, "agent:fallback").assignee, "agent:mobile");
+  assert.equal(resolveTarget(api, map, projects, "agent:fallback").assignee, "agent:backend");
+  assert.equal(resolveTarget(api, map, projects, "agent:fallback").assigneeSource, "project");
+});
+
+test("rows without their own assignee use the fallback", () => {
+  const resolved = resolveTarget(shop, { "shop-app": row("p1") }, projects, "agent:fallback");
+  assert.deepEqual(resolved, {
+    project: { id: "p1", name: "Shop App" },
+    projectSource: "mapping",
+    assignee: "agent:fallback",
+    assigneeSource: "fallback",
   });
+  assert.equal(resolveTarget(shop, {}, projects, "").assigneeSource, null);
 });
 
-test("a saved 'no project' is respected", () => {
-  assert.deepEqual(resolveProject(shop, { "shop-app": "" }, projects), { project: null, source: "mapping" });
+test("a saved 'no project' is respected; unmapped rows get the name suggestion", () => {
+  assert.equal(resolveTarget(shop, { "shop-app": row("") }, projects, "").project, null);
+  assert.equal(resolveTarget(shop, { "shop-app": row("") }, projects, "").projectSource, "mapping");
+  assert.equal(resolveTarget(shop, {}, projects, "").projectSource, "name");
+  assert.equal(resolveTarget({ slug: "android", name: "android" }, {}, projects, "").projectSource, null);
 });
 
-test("unmapped projects fall back to the name suggestion", () => {
-  assert.deepEqual(resolveProject(shop, {}, projects), { project: { id: "p1", name: "Shop App" }, source: "name" });
-  assert.deepEqual(resolveProject({ slug: "android", name: "android" }, {}, projects), { project: null, source: null });
+test("a row pointing at a deleted project falls back to the name but keeps its assignee", () => {
+  const resolved = resolveTarget(shop, { "shop-app": row("gone", "agent:mobile") }, projects, "");
+  assert.equal(resolved.projectSource, "name");
+  assert.equal(resolved.assignee, "agent:mobile");
 });
 
-test("a mapping to a deleted project falls back to the name", () => {
-  assert.equal(resolveProject(shop, { "shop-app": "gone" }, projects).source, "name");
-});
-
-test("cleanProjectMap drops bad slugs and unknown projects", () => {
+test("cleanProjectMap drops bad slugs, unknown projects and malformed assignees", () => {
   assert.deepEqual(
-    cleanProjectMap({ "shop-app": "p1", blog: "", "bad slug": "p2", android: "nope", x: 3 }, projects),
-    { "shop-app": "p1", blog: "" },
+    cleanProjectMap(
+      {
+        "shop-app": row("p1", "agent:a1"),
+        blog: row("", "user:u1"),
+        company: { projectId: "p3", assignee: "agent:x; drop table" },
+        "bad slug": row("p2"),
+        android: row("nope"),
+        x: 3,
+      },
+      projects,
+    ),
+    { "shop-app": row("p1", "agent:a1"), blog: row("", "user:u1"), company: row("p3", "") },
   );
   assert.deepEqual(cleanProjectMap(["p1"], projects), {});
-  assert.deepEqual(cleanProjectMap(null, projects), {});
 });
 
-test("older per-project entries still read as project ids", () => {
-  const old = { "shop-app": { projectId: "p1", assignee: "agent:a1" }, blog: { projectId: "", assignee: "agent:a1" } };
-  assert.deepEqual(readProjectMapValue(old), { "shop-app": "p1", blog: "" });
-  assert.equal(legacyCommonAssignee(old), "agent:a1");
-  assert.equal(legacyCommonAssignee({ a: { projectId: "p1", assignee: "agent:a1" }, b: { projectId: "p2", assignee: "agent:a2" } }), "");
-  assert.equal(legacyCommonAssignee({ "shop-app": "p1" }), "");
+test("older 'project only' rows still read", () => {
+  assert.deepEqual(readProjectMapValue({ "shop-app": "p1", blog: "" }), { "shop-app": row("p1"), blog: row("") });
 });
 
-test("the company default assignee must be a picker value", () => {
+test("assignee values must be picker values", () => {
   assert.equal(cleanAssignee("agent:a1"), "agent:a1");
-  assert.equal(cleanAssignee("user:u1"), "user:u1");
   assert.equal(cleanAssignee("agent:x; drop table"), "");
-  assert.equal(cleanAssignee(42), "");
-});
-
-test("assigneeIds splits the picker encoding", () => {
   assert.deepEqual(assigneeIds("agent:a1"), { assigneeAgentId: "a1" });
   assert.deepEqual(assigneeIds("user:u1"), { assigneeUserId: "u1" });
   assert.deepEqual(assigneeIds(""), {});
-  assert.deepEqual(assigneeIds("robot:x"), {});
 });

@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   AssigneePicker,
   ProjectPicker,
+  useHostContext,
   useHostNavigation,
   usePluginAction,
   usePluginData,
@@ -51,6 +52,17 @@ type Overview =
     };
 
 const PAGE_PATH = "/crashdesk";
+
+/**
+ * Paperclip routes are company-scoped ("/<PREFIX>/crashdesk"). The host does
+ * not add the prefix to every absolute path: it reads "/crashdesk" as a
+ * company called CRASHDESK. So build the path from the active company's own
+ * prefix, whatever that company is called.
+ */
+function useCompanyPath(): (path: string) => string {
+  const { companyPrefix } = useHostContext();
+  return (path: string) => (companyPrefix ? `/${encodeURIComponent(companyPrefix)}${path}` : path);
+}
 const PERIODS: Period[] = ["24h", "7d", "14d"];
 
 // ---------------------------------------------------------------------------
@@ -213,10 +225,11 @@ const sectionTitle: CSSProperties = {
 
 function TaskChip({ task }: { task: LinkedTask }) {
   const nav = useHostNavigation();
+  const companyPath = useCompanyPath();
   const label = `${task.identifier ?? "Task"} · ${task.status.replace("_", " ")}`;
   return (
     <a
-      {...nav.linkProps(`/issues/${task.identifier ?? task.id}`)}
+      {...nav.linkProps(companyPath(`/issues/${encodeURIComponent(task.identifier ?? task.id)}`))}
       className="cd-link"
       title={task.title}
       style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${c.input}`, borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}
@@ -595,6 +608,7 @@ function SetupCard({ message }: { message: string }) {
 
 export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
   const nav = useHostNavigation();
+  const companyPath = useCompanyPath();
   const { data, loading, error, refresh } = usePluginData<Overview>("overview", {
     companyId: context.companyId,
     period: "24h",
@@ -703,7 +717,7 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
         </>
       )}
 
-      <a {...nav.linkProps(PAGE_PATH)} className="cd-link" style={{ fontSize: 13, color: c.mutedFg, alignSelf: "flex-start" }}>
+      <a {...nav.linkProps(companyPath(PAGE_PATH))} className="cd-link" style={{ fontSize: 13, color: c.mutedFg, alignSelf: "flex-start" }}>
         {data && !data.configured ? "Set up Crashdesk →" : "Open Crashdesk →"}
       </a>
     </div>
@@ -716,10 +730,11 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
 
 export function CrashdeskSidebarLink(_props: PluginSidebarProps) {
   const nav = useHostNavigation();
+  const companyPath = useCompanyPath();
   return (
     <>
       <style>{CSS}</style>
-      <a {...nav.linkProps(PAGE_PATH)} className="cd-nav">
+      <a {...nav.linkProps(companyPath(PAGE_PATH))} className="cd-nav">
         <BugIcon size={16} />
         Crashdesk
       </a>

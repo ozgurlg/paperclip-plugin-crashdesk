@@ -7,20 +7,16 @@ import {
   type PluginHealthDiagnostics,
   type ToolResult,
 } from "@paperclipai/plugin-sdk";
-import { CONFIG_KEYS, readConfig, parseConfig, type CrashdeskConfig } from "./config.ts";
-import {
-  ACTION_KEYS,
-  DATA_KEYS,
-  DEFAULTS,
-  JOB_KEYS,
-  ORIGIN_KIND,
-  PERIODS,
-  TOOL_NAMES,
-  type Period,
-} from "./constants.ts";
+import { CONFIG_KEYS, parseConfig, readConfig, type CrashdeskConfig } from "./config.ts";
+import { ACTION_KEYS, DATA_KEYS, DEFAULTS, JOB_KEYS, ORIGIN_KIND, PERIODS, TOOL_NAMES, type Period } from "./constants.ts";
 import { createSentryProvider } from "./providers/sentry.ts";
 import { ProviderError, type ErrorIssue, type ErrorProvider } from "./providers/types.ts";
 import { buildTaskDescription, buildTaskTitle, originIdFor, sanitize } from "./task.ts";
+
+// Paperclip keeps plugin settings per company, so everything here is scoped
+// to a company: its settings, its cached error lists and its tasks. Calls from
+// the UI, actions and agent tools carry the company; the scheduled job has
+// none, so it walks every company and syncs the ones that are set up.
 
 // ---------------------------------------------------------------------------
 // Types shared with the UI (kept structural; the UI declares its own copy)
@@ -41,55 +37,62 @@ interface LinkedTask {
   title: string;
 }
 
-type SetupProblem = "missing-organization" | "missing-token" | "token-pasted" | "token-unresolvable";
+type SetupProblem = "no-company" | "missing-organization" | "missing-token" | "token-pasted" | "token-unresolvable";
 
 const SETUP_MESSAGES: Record<SetupProblem, string> = {
+  "no-company": "Open Crashdesk inside a company.",
   "missing-organization": "Set your Sentry organization slug in the plugin settings.",
   "missing-token": "Choose a Sentry auth token secret in the plugin settings.",
   "token-pasted":
-    "The Sentry auth token field holds pasted text. Store the token as a Paperclip secret and pick it with the secret picker.",
+    "The auth token field holds pasted text. Store the token as a Paperclip secret and pick it with the secret picker.",
   "token-unresolvable": "The Sentry auth token secret could not be read. Pick it again in the plugin settings.",
 };
 
 const PRIORITIES = ["critical", "high", "medium", "low"] as const;
 type Priority = (typeof PRIORITIES)[number];
 
+type Setup = { provider: ErrorProvider; config: CrashdeskConfig } | { problem: SetupProblem };
+
+// Last outcome per company, for the health panel.
+const health = new Map<string, { problem: SetupProblem | null; syncError: string | null }>();
+
 // ---------------------------------------------------------------------------
 // Provider setup
 // ---------------------------------------------------------------------------
 
-let lastProblem: SetupProblem | null = null;
-let lastSyncError: string | null = null;
-
 async function resolveToken(
   ctx: PluginContext,
+  companyId: string,
   ref: string | EnvSecretRefBinding | null,
 ): Promise<{ token: string } | { problem: SetupProblem }> {
   if (ref === null || (typeof ref === "string" && ref.trim() === "")) return { problem: "missing-token" };
   // The host only resolves structured secret bindings; a string is pasted text.
   if (typeof ref === "string") return { problem: "token-pasted" };
   try {
-    const value = await ctx.secrets.resolve(ref, { configPath: CONFIG_KEYS.token });
+    const value = await ctx.secrets.resolve(ref, { companyId, configPath: CONFIG_KEYS.token });
     return value.trim() ? { token: value.trim() } : { problem: "token-unresolvable" };
   } catch {
     return { problem: "token-unresolvable" };
   }
 }
 
-async function getProvider(
-  ctx: PluginContext,
-): Promise<{ provider: ErrorProvider; config: CrashdeskConfig } | { problem: SetupProblem }> {
-  const config = await readConfig(ctx);
+function noteHealth(companyId: string, patch: Partial<{ problem: SetupProblem | null; syncError: string | null }>) {
+  const current = health.get(companyId) ?? { problem: null, syncError: null };
+  health.set(companyId, { ...current, ...patch });
+}
+
+async function getProvider(ctx: PluginContext, companyId: string): Promise<Setup> {
+  const config = await readConfig(ctx, companyId);
   if (!config.organization) {
-    lastProblem = "missing-organization";
-    return { problem: lastProblem };
+    noteHealth(companyId, { problem: "missing-organization" });
+    return { problem: "missing-organization" };
   }
-  const token = await resolveToken(ctx, config.authToken);
+  const token = await resolveToken(ctx, companyId, config.authToken);
   if ("problem" in token) {
-    lastProblem = token.problem;
+    noteHealth(companyId, { problem: token.problem });
     return { problem: token.problem };
   }
-  lastProblem = null;
+  noteHealth(companyId, { problem: null });
   const provider = createSentryProvider({
     baseUrl: config.sentryUrl,
     organization: config.organization,
@@ -110,60 +113,71 @@ function asPeriod(value: unknown): Period {
   return PERIODS.includes(value as Period) ? (value as Period) : "24h";
 }
 
-// ---------------------------------------------------------------------------
-// Snapshots: one cached issue list per period, refreshed by the job or on demand
-// ---------------------------------------------------------------------------
-
-const stateKey = (period: Period) => ({ scopeKind: "instance" as const, stateKey: `snapshot:${period}` });
-
-async function readSnapshot(ctx: PluginContext, period: Period): Promise<Snapshot | null> {
-  return ((await ctx.state.get(stateKey(period))) as Snapshot | null) ?? null;
+function asCompanyId(...candidates: unknown[]): string | null {
+  for (const value of candidates) if (typeof value === "string" && value.trim()) return value.trim();
+  return null;
 }
 
-// One refresh at a time per period, so the job and a click never race.
-const inFlight = new Map<Period, Promise<Snapshot | { problem: SetupProblem }>>();
+// ---------------------------------------------------------------------------
+// Snapshots: one cached issue list per company and period
+// ---------------------------------------------------------------------------
 
-function refresh(ctx: PluginContext, period: Period): Promise<Snapshot | { problem: SetupProblem }> {
-  const running = inFlight.get(period);
+const stateKey = (companyId: string, period: Period) => ({
+  scopeKind: "company" as const,
+  scopeId: companyId,
+  stateKey: `snapshot:${period}`,
+});
+
+async function readSnapshot(ctx: PluginContext, companyId: string, period: Period): Promise<Snapshot | null> {
+  return ((await ctx.state.get(stateKey(companyId, period))) as Snapshot | null) ?? null;
+}
+
+// One refresh at a time per company and period, so the job and a click never race.
+const inFlight = new Map<string, Promise<Snapshot | { problem: SetupProblem }>>();
+
+function refresh(ctx: PluginContext, companyId: string, period: Period): Promise<Snapshot | { problem: SetupProblem }> {
+  const key = `${companyId}:${period}`;
+  const running = inFlight.get(key);
   if (running) return running;
-  const next = runRefresh(ctx, period).finally(() => inFlight.delete(period));
-  inFlight.set(period, next);
+  const next = runRefresh(ctx, companyId, period).finally(() => inFlight.delete(key));
+  inFlight.set(key, next);
   return next;
 }
 
-async function runRefresh(ctx: PluginContext, period: Period): Promise<Snapshot | { problem: SetupProblem }> {
-  const setup = await getProvider(ctx);
+async function runRefresh(
+  ctx: PluginContext,
+  companyId: string,
+  period: Period,
+): Promise<Snapshot | { problem: SetupProblem }> {
+  const setup = await getProvider(ctx, companyId);
   if ("problem" in setup) return setup;
 
   let snapshot: Snapshot;
   try {
     const issues = await setup.provider.listIssues({ period, limit: DEFAULTS.issueLimit });
     snapshot = { period, fetchedAt: new Date().toISOString(), ok: true, error: null, issues };
-    lastSyncError = null;
+    noteHealth(companyId, { syncError: null });
   } catch (err) {
     const message = errorMessage(err);
-    ctx.logger.warn("Error sync failed", { period, error: message });
-    lastSyncError = message;
+    ctx.logger.warn("Error sync failed", { companyId, period, error: message });
+    noteHealth(companyId, { syncError: message });
     // Keep the last good list visible; only mark it as failed.
-    const previous = await readSnapshot(ctx, period);
-    snapshot = {
-      period,
-      fetchedAt: new Date().toISOString(),
-      ok: false,
-      error: message,
-      issues: previous?.issues ?? [],
-    };
+    const previous = await readSnapshot(ctx, companyId, period);
+    snapshot = { period, fetchedAt: new Date().toISOString(), ok: false, error: message, issues: previous?.issues ?? [] };
   }
-  await ctx.state.set(stateKey(period), snapshot);
+  await ctx.state.set(stateKey(companyId, period), snapshot);
   return snapshot;
 }
 
-async function freshSnapshot(ctx: PluginContext, period: Period): Promise<Snapshot | { problem: SetupProblem }> {
-  const config = await readConfig(ctx);
-  const cached = await readSnapshot(ctx, period);
-  const maxAgeMs = config.pollIntervalMinutes * 60_000;
-  if (cached && Date.now() - Date.parse(cached.fetchedAt) < maxAgeMs) return cached;
-  return refresh(ctx, period);
+async function freshSnapshot(
+  ctx: PluginContext,
+  companyId: string,
+  period: Period,
+): Promise<Snapshot | { problem: SetupProblem }> {
+  const config = await readConfig(ctx, companyId);
+  const cached = await readSnapshot(ctx, companyId, period);
+  if (cached && Date.now() - Date.parse(cached.fetchedAt) < config.pollIntervalMinutes * 60_000) return cached;
+  return refresh(ctx, companyId, period);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,13 +211,12 @@ async function linkedTasks(ctx: PluginContext, companyId: string): Promise<Recor
 const plugin: PaperclipPlugin = definePlugin({
   async setup(ctx) {
     ctx.data.register(DATA_KEYS.overview, async (params) => {
+      const companyId = asCompanyId(params.companyId);
+      if (!companyId) return { configured: false, setupMessage: SETUP_MESSAGES["no-company"] };
       const period = asPeriod(params.period);
-      const companyId = typeof params.companyId === "string" ? params.companyId : null;
-      const result = await freshSnapshot(ctx, period);
-      if ("problem" in result) {
-        return { configured: false, setupMessage: SETUP_MESSAGES[result.problem] };
-      }
-      const links = companyId ? await linkedTasks(ctx, companyId) : {};
+      const result = await freshSnapshot(ctx, companyId, period);
+      if ("problem" in result) return { configured: false, setupMessage: SETUP_MESSAGES[result.problem] };
+      const links = await linkedTasks(ctx, companyId);
       return {
         configured: true,
         provider: "Sentry",
@@ -218,16 +231,18 @@ const plugin: PaperclipPlugin = definePlugin({
       };
     });
 
-    ctx.actions.register(ACTION_KEYS.refresh, async (params) => {
-      const result = await refresh(ctx, asPeriod(params.period));
+    ctx.actions.register(ACTION_KEYS.refresh, async (params, actionCtx) => {
+      const companyId = asCompanyId(params.companyId, actionCtx.companyId);
+      if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
+      const result = await refresh(ctx, companyId, asPeriod(params.period));
       if ("problem" in result) throw new Error(SETUP_MESSAGES[result.problem]);
       return { fetchedAt: result.fetchedAt, ok: result.ok, error: result.error };
     });
 
     ctx.actions.register(ACTION_KEYS.createTask, async (params, actionCtx) => {
-      const companyId = typeof params.companyId === "string" ? params.companyId : actionCtx.companyId;
+      const companyId = asCompanyId(params.companyId, actionCtx.companyId);
       const issueId = typeof params.issueId === "string" ? params.issueId.trim() : "";
-      if (!companyId) throw new Error("Open Crashdesk inside a company to create tasks.");
+      if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(issueId)) throw new Error("Unknown error id.");
 
       const originId = originIdFor("sentry", issueId);
@@ -236,7 +251,7 @@ const plugin: PaperclipPlugin = definePlugin({
         return { created: false, task: existing };
       }
 
-      const setup = await getProvider(ctx);
+      const setup = await getProvider(ctx, companyId);
       if ("problem" in setup) throw new Error(SETUP_MESSAGES[setup.problem]);
 
       let detail;
@@ -253,11 +268,9 @@ const plugin: PaperclipPlugin = definePlugin({
           : detail.issue.level === "error"
             ? "high"
             : "medium";
-      const assigneeAgentId =
-        typeof params.assigneeAgentId === "string" && params.assigneeAgentId ? params.assigneeAgentId : undefined;
-      const assigneeUserId =
-        typeof params.assigneeUserId === "string" && params.assigneeUserId ? params.assigneeUserId : undefined;
-      const projectId = typeof params.projectId === "string" && params.projectId ? params.projectId : undefined;
+      const assigneeAgentId = asCompanyId(params.assigneeAgentId) ?? undefined;
+      const assigneeUserId = asCompanyId(params.assigneeUserId) ?? undefined;
+      const projectId = asCompanyId(params.projectId) ?? undefined;
 
       const task = await ctx.issues.create({
         companyId,
@@ -273,7 +286,7 @@ const plugin: PaperclipPlugin = definePlugin({
         actor: { actorUserId: actionCtx.actor.userId ?? null },
       });
 
-      ctx.logger.info("Created task for error", { issueId, taskId: task.id });
+      ctx.logger.info("Created task for error", { companyId, issueId, taskId: task.id });
       return {
         created: true,
         task: {
@@ -286,11 +299,26 @@ const plugin: PaperclipPlugin = definePlugin({
     });
 
     ctx.jobs.register(JOB_KEYS.sync, async () => {
-      const config = await readConfig(ctx);
-      const cached = await readSnapshot(ctx, "24h");
-      // The cron runs every few minutes; honour the configured interval.
-      if (cached && Date.now() - Date.parse(cached.fetchedAt) < config.pollIntervalMinutes * 60_000 * 0.9) return;
-      await refresh(ctx, "24h");
+      const companies = await ctx.companies.list({ limit: 200 });
+      const failures: string[] = [];
+      for (const company of companies) {
+        let config: CrashdeskConfig;
+        try {
+          config = await readConfig(ctx, company.id);
+        } catch (err) {
+          ctx.logger.warn("Could not read settings for company", { companyId: company.id, error: String(err) });
+          continue;
+        }
+        if (!config.organization) continue; // Crashdesk is not set up for this company.
+        const cached = await readSnapshot(ctx, company.id, "24h");
+        // The cron fires every few minutes; honour the configured interval.
+        if (cached && Date.now() - Date.parse(cached.fetchedAt) < config.pollIntervalMinutes * 60_000 * 0.9) continue;
+        const result = await refresh(ctx, company.id, "24h");
+        if ("problem" in result) failures.push(`${company.id}: ${SETUP_MESSAGES[result.problem]}`);
+        else if (!result.ok && result.error) failures.push(`${company.id}: ${result.error}`);
+      }
+      // A failed run shows up on the plugin's status page.
+      if (failures.length > 0) throw new Error(`Sync failed for ${failures.length} company(s): ${failures.join("; ")}`);
     });
 
     ctx.tools.register(
@@ -306,7 +334,7 @@ const plugin: PaperclipPlugin = definePlugin({
       },
       async (params, runCtx): Promise<ToolResult> => {
         const period = asPeriod((params as { period?: unknown } | null)?.period);
-        const result = await freshSnapshot(ctx, period);
+        const result = await freshSnapshot(ctx, runCtx.companyId, period);
         if ("problem" in result) return { error: SETUP_MESSAGES[result.problem] };
         const links = await linkedTasks(ctx, runCtx.companyId);
         const rows = result.issues.map((issue) => {
@@ -346,10 +374,10 @@ const plugin: PaperclipPlugin = definePlugin({
           required: ["id"],
         },
       },
-      async (params): Promise<ToolResult> => {
+      async (params, runCtx): Promise<ToolResult> => {
         const id = String((params as { id?: unknown } | null)?.id ?? "").trim();
         if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return { error: "Unknown error id." };
-        const setup = await getProvider(ctx);
+        const setup = await getProvider(ctx, runCtx.companyId);
         if ("problem" in setup) return { error: SETUP_MESSAGES[setup.problem] };
         try {
           const detail = await setup.provider.getIssue(id, "24h");
@@ -364,9 +392,10 @@ const plugin: PaperclipPlugin = definePlugin({
   },
 
   async onHealth(): Promise<PluginHealthDiagnostics> {
-    if (lastProblem) return { status: "degraded", message: SETUP_MESSAGES[lastProblem] };
-    if (lastSyncError) return { status: "degraded", message: lastSyncError };
-    return { status: "ok", message: "Crashdesk is syncing errors" };
+    for (const state of health.values()) {
+      if (state.syncError) return { status: "degraded", message: state.syncError };
+    }
+    return { status: "ok", message: "Crashdesk is running" };
   },
 
   async onValidateConfig(raw) {

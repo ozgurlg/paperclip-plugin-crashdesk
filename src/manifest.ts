@@ -41,7 +41,8 @@ const manifest: PaperclipPluginManifestV1 = {
   },
   // Paperclip stores this schema as Postgres jsonb, which orders keys by
   // length, then alphabetically. The form follows that order, so the key
-  // names are chosen to read top to bottom: org, url, token, projects, environment.
+  // names are chosen to read top to bottom: org, url, token, projects,
+  // environment, refreshMinutes.
   instanceConfigSchema: {
     type: "object",
     properties: {
@@ -73,6 +74,13 @@ const manifest: PaperclipPluginManifestV1 = {
         type: "string",
         title: "Environment (optional)",
         description: "Only show errors from this environment, e.g. production.",
+      },
+      refreshMinutes: {
+        type: "number",
+        title: "Refresh interval (minutes)",
+        description: "How often errors are fetched in the background. At least 5.",
+        default: DEFAULTS.pollIntervalMinutes,
+        minimum: 5,
       },
     },
     required: ["org"],

@@ -17,7 +17,10 @@ export const CONFIG_KEYS = {
   token: "token",
   projects: "projects",
   environment: "environment",
+  refreshMinutes: "refreshMinutes",
 } as const;
+
+const MIN_REFRESH_MINUTES = 5; // the sync job runs every 5 minutes
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -40,11 +43,17 @@ export function parseConfig(raw: Record<string, unknown>): CrashdeskConfig {
         : null,
     projects: parseProjects(raw[CONFIG_KEYS.projects]),
     environment: text(raw[CONFIG_KEYS.environment]) || null,
-    // Not a setting: every 10 minutes is right for nearly everyone.
-    pollIntervalMinutes: DEFAULTS.pollIntervalMinutes,
+    pollIntervalMinutes: refreshMinutes(raw[CONFIG_KEYS.refreshMinutes]),
   };
 }
 
-export async function readConfig(ctx: PluginContext): Promise<CrashdeskConfig> {
-  return parseConfig((await ctx.config.get()) ?? {});
+function refreshMinutes(value: unknown): number {
+  const n = Number(value);
+  if (value === undefined || value === null || value === "" || !Number.isFinite(n)) return DEFAULTS.pollIntervalMinutes;
+  return Math.min(Math.max(Math.round(n), MIN_REFRESH_MINUTES), 1440);
+}
+
+/** Settings are per company in Paperclip; the host refuses config.get without one. */
+export async function readConfig(ctx: PluginContext, companyId: string): Promise<CrashdeskConfig> {
+  return parseConfig((await ctx.config.get(companyId)) ?? {});
 }

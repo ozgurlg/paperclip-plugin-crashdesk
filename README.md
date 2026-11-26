@@ -93,8 +93,9 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 | Auth token | yes | Pick the secret from step 2. Pasted text is rejected on purpose. |
 | Projects | no | Comma-separated project slugs. Empty means every project the token can see. |
 | Environment | no | Only show one environment, e.g. `production`. |
+| Refresh interval | no | Minutes between background syncs. Default 10, at least 5. **Refresh** on the page syncs right away. |
 
-Errors sync in the background every 10 minutes, and right away when you press **Refresh**.
+Settings are per company, so each Paperclip company can connect its own Sentry organization.
 
 The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (or `/<company-prefix>/crashdesk`) opens the full errors page. The first sync runs right away.
 

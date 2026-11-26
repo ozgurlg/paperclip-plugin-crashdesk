@@ -59,8 +59,19 @@ const PAGE_PATH = "/crashdesk";
  * company called CRASHDESK. So build the path from the active company's own
  * prefix, whatever that company is called.
  */
+/**
+ * Paperclip does not pass companyPrefix to every slot (dashboard widgets get
+ * none). Company routes always start with the prefix, so fall back to the
+ * first segment of the current URL, the same way the host resolves it.
+ */
+function prefixFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  const first = window.location.pathname.split("/").filter(Boolean)[0];
+  return first ? decodeURIComponent(first) : null;
+}
+
 function useCompanyPath(): (path: string) => string | null {
-  const { companyPrefix } = useHostContext();
+  const companyPrefix = useHostContext().companyPrefix ?? prefixFromLocation();
   // Without a company there is no valid in-app route: render no link rather than a broken one.
   return (path: string) => (companyPrefix ? `/${encodeURIComponent(companyPrefix)}${path}` : null);
 }

@@ -1,0 +1,71 @@
+{
+  "name": "paperclip-plugin-crashdesk",
+  "version": "0.1.0",
+  "description": "Error tracking for Paperclip: see your Sentry issues and hand them to an agent as a Paperclip task in one click",
+  "type": "module",
+  "main": "./dist/manifest.js",
+  "exports": {
+    ".": "./dist/manifest.js",
+    "./worker": "./dist/worker.js",
+    "./ui": "./dist/ui/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "dev": "node ./scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "2026.1117.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.7",
+    "@types/react": "19.3.3",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "paperclip",
+    "paperclip-plugin",
+    "plugin",
+    "sentry",
+    "error-tracking",
+    "crash-reporting",
+    "ai-agent",
+    "agents"
+  ],
+  "license": "MIT",
+  "author": "ozgurlg",
+  "homepage": "https://github.com/ozgurlg/paperclip-plugin-crashdesk#readme",
+  "bugs": {
+    "url": "https://github.com/ozgurlg/paperclip-plugin-crashdesk/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ozgurlg/paperclip-plugin-crashdesk.git"
+  }
+}

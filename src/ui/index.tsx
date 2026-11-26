@@ -280,6 +280,76 @@ function TaskChip({ task }: { task: LinkedTask }) {
   );
 }
 
+/**
+ * With a complete mapping (project and default assignee) the task is one click:
+ * the worker fills in project, assignee and a priority from the error level.
+ * "⋯" still opens the form for a one-off change. Without a complete mapping
+ * the button opens the form, because there is something to choose.
+ */
+function CreateTaskButton({
+  companyId,
+  issue,
+  label,
+  match,
+  formOpen,
+  onToggleForm,
+  onCreated,
+}: {
+  companyId: string;
+  issue: ErrorIssue;
+  label: string;
+  match: ProjectMatch | undefined;
+  formOpen: boolean;
+  onToggleForm: () => void;
+  onCreated: () => void;
+}) {
+  const createTask = usePluginAction("create-task");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ready = match?.source === "mapping" && Boolean(match.id) && Boolean(match.assignee);
+
+  if (!ready) {
+    return (
+      <button type="button" className={formOpen ? "cd-btn" : "cd-btn cd-btn-primary"} onClick={onToggleForm} aria-expanded={formOpen}>
+        {label}
+      </button>
+    );
+  }
+
+  async function createNow() {
+    setBusy(true);
+    setError(null);
+    try {
+      // No project, assignee or priority: the worker uses the mapping and the error level.
+      await createTask({ companyId, issueId: issue.id });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the task.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button type="button" className="cd-btn cd-btn-primary" onClick={() => void createNow()} disabled={busy}>
+          {busy ? "Creating…" : label}
+        </button>
+        <button type="button" className="cd-btn" onClick={onToggleForm} aria-expanded={formOpen} aria-label="Choose project, assignee and priority" title="Choose project, assignee and priority" disabled={busy}>
+          ⋯
+        </button>
+      </div>
+      <span style={{ fontSize: 11, color: c.mutedFg }}>→ {match!.name} · default assignee</span>
+      {error && (
+        <span role="alert" style={{ fontSize: 12, color: c.destructive }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function CreateTaskForm({
   companyId,
   issue,
@@ -539,14 +609,15 @@ export function CrashdeskPage({ context }: PluginPageProps) {
                             canCreate && companyId ? (
                               <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
                                 {link && <TaskChip task={link} />}
-                                <button
-                                  type="button"
-                                  className={openForm === issue.id ? "cd-btn" : "cd-btn cd-btn-primary"}
-                                  onClick={() => setOpenForm(openForm === issue.id ? null : issue.id)}
-                                  aria-expanded={openForm === issue.id}
-                                >
-                                  {link ? "New task" : "Create task"}
-                                </button>
+                                <CreateTaskButton
+                                  companyId={companyId}
+                                  issue={issue}
+                                  label={link ? "New task" : "Create task"}
+                                  match={data.projectMatches?.[issue.id]}
+                                  formOpen={openForm === issue.id}
+                                  onToggleForm={() => setOpenForm(openForm === issue.id ? null : issue.id)}
+                                  onCreated={refresh}
+                                />
                               </div>
                             ) : link ? (
                               <TaskChip task={link} />

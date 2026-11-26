@@ -22,7 +22,7 @@ Sentry is already great at showing errors. What it cannot do is say "Software En
 
 - **Dashboard widget.** The day's headline numbers and the three most frequent errors, right on the Paperclip dashboard.
 - **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project.
-- **Create task.** Turn an error into a Paperclip task. Choose the assignee and priority with Paperclip's own pickers; the project comes from your project mapping. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
+- **Create task.** Turn an error into a Paperclip task. With a project and default assignee mapped, it is one click (priority follows the error level); **⋯** opens Paperclip's own pickers for a one-off change. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
 - **No duplicates.** Each task is linked to its error, so the same error never becomes two open tasks, and the table shows every linked task's live status.
 - **Agent tools.** Agents can call `list-errors` and `get-error` to check on errors themselves.
 - **Native look.** Built on Paperclip's own theme tokens and components. Follows light and dark mode.

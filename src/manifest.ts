@@ -39,48 +39,43 @@ const manifest: PaperclipPluginManifestV1 = {
     worker: "./dist/worker.js",
     ui: "./dist/ui",
   },
+  // Paperclip stores this schema as Postgres jsonb, which orders keys by
+  // length, then alphabetically. The form follows that order, so the key
+  // names are chosen to read top to bottom: org, url, token, projects, environment.
   instanceConfigSchema: {
     type: "object",
     properties: {
-      sentryUrl: {
-        type: "string",
-        title: "Sentry URL",
-        description:
-          "https://sentry.io for the US region, https://de.sentry.io for the EU region, or the address of your self-hosted Sentry.",
-        default: DEFAULTS.baseUrl,
-      },
-      organization: {
+      org: {
         type: "string",
         title: "Organization slug",
-        description: "The slug in your Sentry URL, e.g. acme in sentry.io/organizations/acme/.",
+        description: "The slug in your Sentry URL, e.g. acme in acme.sentry.io or sentry.io/organizations/acme/.",
       },
-      authToken: {
+      url: {
+        type: "string",
+        title: "Sentry URL",
+        description: "https://sentry.io (US), https://de.sentry.io (EU), or the address of your self-hosted Sentry.",
+        default: DEFAULTS.baseUrl,
+      },
+      token: {
         // The secret picker sends a structured binding; a plain string means pasted text.
         type: ["string", "object"],
         format: "secret-ref",
-        title: "Sentry auth token",
+        title: "Auth token",
         description:
-          "A token with the event:read scope, stored as a Paperclip secret. In Sentry: Settings → Developer Settings → Custom Integrations → New Internal Integration, set Issue & Event to Read.",
+          "A Sentry token with the event:read scope, stored as a Paperclip secret. In Sentry: Settings → Developer Settings → Custom Integrations → New Internal Integration, Issue & Event: Read.",
       },
       projects: {
         type: "string",
         title: "Projects (optional)",
-        description: "Comma-separated project slugs to include. Leave empty for every project the token can see.",
+        description: "Comma-separated project slugs. Empty means every project the token can see.",
       },
       environment: {
         type: "string",
         title: "Environment (optional)",
         description: "Only show errors from this environment, e.g. production.",
       },
-      pollIntervalMinutes: {
-        type: "number",
-        title: "Refresh interval (minutes)",
-        description: "How often errors are fetched in the background.",
-        default: DEFAULTS.pollIntervalMinutes,
-        minimum: 1,
-      },
     },
-    required: ["organization"],
+    required: ["org"],
   },
   jobs: [
     {

@@ -10,6 +10,15 @@ export interface CrashdeskConfig {
   pollIntervalMinutes: number;
 }
 
+/** Settings keys, as declared in the manifest. */
+export const CONFIG_KEYS = {
+  organization: "org",
+  url: "url",
+  token: "token",
+  projects: "projects",
+  environment: "environment",
+} as const;
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -21,19 +30,18 @@ export function parseProjects(value: unknown): string[] {
 }
 
 export function parseConfig(raw: Record<string, unknown>): CrashdeskConfig {
-  const interval = Number(raw.pollIntervalMinutes);
-  const token = raw.authToken;
+  const token = raw[CONFIG_KEYS.token];
   return {
-    sentryUrl: text(raw.sentryUrl) || DEFAULTS.baseUrl,
-    organization: text(raw.organization),
+    sentryUrl: text(raw[CONFIG_KEYS.url]) || DEFAULTS.baseUrl,
+    organization: text(raw[CONFIG_KEYS.organization]),
     authToken:
       typeof token === "string" || (token !== null && typeof token === "object")
         ? (token as string | EnvSecretRefBinding)
         : null,
-    projects: parseProjects(raw.projects),
-    environment: text(raw.environment) || null,
-    pollIntervalMinutes:
-      Number.isFinite(interval) && interval >= 1 ? Math.min(Math.round(interval), 1440) : DEFAULTS.pollIntervalMinutes,
+    projects: parseProjects(raw[CONFIG_KEYS.projects]),
+    environment: text(raw[CONFIG_KEYS.environment]) || null,
+    // Not a setting: every 10 minutes is right for nearly everyone.
+    pollIntervalMinutes: DEFAULTS.pollIntervalMinutes,
   };
 }
 

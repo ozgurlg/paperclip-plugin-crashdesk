@@ -12,18 +12,19 @@ test("defaults", () => {
   assert.equal(config.pollIntervalMinutes, 10);
 });
 
+test("reads the manifest keys", () => {
+  const config = parseConfig({ org: " acme ", url: "https://de.sentry.io", environment: "production" });
+  assert.equal(config.organization, "acme");
+  assert.equal(config.sentryUrl, "https://de.sentry.io");
+  assert.equal(config.environment, "production");
+});
+
 test("projects accept a list or a comma-separated string", () => {
   assert.deepEqual(parseProjects("shop-app, blog,,shop-app"), ["shop-app", "blog"]);
   assert.deepEqual(parseProjects(["a", " b ", 3]), ["a", "b"]);
 });
 
-test("interval is clamped", () => {
-  assert.equal(parseConfig({ pollIntervalMinutes: 0 }).pollIntervalMinutes, 10);
-  assert.equal(parseConfig({ pollIntervalMinutes: 99999 }).pollIntervalMinutes, 1440);
-  assert.equal(parseConfig({ pollIntervalMinutes: "15" }).pollIntervalMinutes, 15);
-});
-
 test("secret binding objects are kept as-is", () => {
   const ref = { type: "secret_ref", secretId: "abc", version: "latest" };
-  assert.deepEqual(parseConfig({ authToken: ref }).authToken, ref);
+  assert.deepEqual(parseConfig({ token: ref }).authToken, ref);
 });

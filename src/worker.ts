@@ -7,7 +7,7 @@ import {
   type PluginHealthDiagnostics,
   type ToolResult,
 } from "@paperclipai/plugin-sdk";
-import { readConfig, parseConfig, type CrashdeskConfig } from "./config.ts";
+import { CONFIG_KEYS, readConfig, parseConfig, type CrashdeskConfig } from "./config.ts";
 import {
   ACTION_KEYS,
   DATA_KEYS,
@@ -69,7 +69,7 @@ async function resolveToken(
   // The host only resolves structured secret bindings; a string is pasted text.
   if (typeof ref === "string") return { problem: "token-pasted" };
   try {
-    const value = await ctx.secrets.resolve(ref, { configPath: "authToken" });
+    const value = await ctx.secrets.resolve(ref, { configPath: CONFIG_KEYS.token });
     return value.trim() ? { token: value.trim() } : { problem: "token-unresolvable" };
   } catch {
     return { problem: "token-unresolvable" };

@@ -70,7 +70,7 @@ npm install
 npm run build
 ```
 
-Then install the folder in Paperclip, either from the plugin manager (**Instance settings → Plugins → Install Plugin**, giving the full path of the folder) or with the API, signed in as a board user:
+Then install the folder in Paperclip, either from the plugin manager (**Settings → Plugins → Install Plugin**, giving the full path of the folder) or with the API, signed in as a board user:
 
 ```bash
 curl -X POST http://localhost:3100/api/plugins/install \
@@ -83,17 +83,18 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 ## Connect Sentry
 
 1. **Create a token.** In Sentry, open **Settings → Developer Settings → Custom Integrations → Create New Integration → Internal Integration**. Give it a name, set **Issue & Event** to **Read**, leave everything else at **No Access**, and save. Copy the token.
-2. **Store it as a secret.** In Paperclip, open **Company settings → Secrets** and add the token.
-3. **Configure the plugin.** Open **Instance settings → Plugins → Crashdesk** and fill in:
+2. **Store it as a secret.** In Paperclip, open **Settings → Secrets** and add the token.
+3. **Configure the plugin.** Open **Settings → Plugins → Crashdesk** and fill in:
 
 | Setting | Required | Description |
 |---|---|---|
-| Sentry URL | no | `https://sentry.io` (US, default), `https://de.sentry.io` (EU), or your self-hosted address. |
 | Organization slug | yes | The slug in your Sentry URL, e.g. `acme`. |
-| Sentry auth token | yes | Pick the secret from step 2. Pasted text is rejected on purpose. |
+| Sentry URL | no | `https://sentry.io` (US, default), `https://de.sentry.io` (EU), or your self-hosted address. |
+| Auth token | yes | Pick the secret from step 2. Pasted text is rejected on purpose. |
 | Projects | no | Comma-separated project slugs. Empty means every project the token can see. |
 | Environment | no | Only show one environment, e.g. `production`. |
-| Refresh interval | no | Minutes between background syncs. Default 10. |
+
+Errors sync in the background every 10 minutes, and right away when you press **Refresh**.
 
 The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (or `/<company-prefix>/crashdesk`) opens the full errors page. The first sync runs right away.
 

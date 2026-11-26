@@ -616,8 +616,8 @@ function SetupCard({ message }: { message: string }) {
       <p style={{ margin: 0, color: c.mutedFg }}>{message}</p>
       <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6, lineHeight: 1.5 }}>
         <li>In Sentry, open Settings → Developer Settings → Custom Integrations and create an Internal Integration with Issue &amp; Event set to Read.</li>
-        <li>Copy its token and save it in Paperclip under Company settings → Secrets.</li>
-        <li>Open Instance settings → Plugins → Crashdesk, enter your organization slug and pick the secret.</li>
+        <li>Copy its token and save it in Paperclip under Settings → Secrets.</li>
+        <li>Open Settings → Plugins → Crashdesk, enter your organization slug and pick the secret.</li>
       </ol>
     </section>
   );

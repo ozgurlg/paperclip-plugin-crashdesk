@@ -788,14 +788,17 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
   ];
 
   return (
-    <div className="cd-root" style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px" }}>
+    <div
+      className="cd-root"
+      style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px", minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden" }}
+    >
       <style>{CSS + "@keyframes cd-spin { to { transform: rotate(360deg); } }"}</style>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, minWidth: 0 }}>
         <span style={{ color: c.mutedFg, display: "flex" }}>
           <BugIcon size={16} />
         </span>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, flexGrow: 1 }}>App Errors</h2>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, flexGrow: 1, minWidth: 0 }}>App Errors</h2>
         <span style={{ fontSize: 12, color: c.mutedFg }}>
           {data?.configured ? `Last 24h · ${timeAgo(data.snapshot.fetchedAt)}` : ""}
         </span>
@@ -859,7 +862,7 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
                       >
                         {issue.title}
                       </span>
-                      <span style={{ fontSize: 12, color: c.mutedFg }}>
+                      <span style={{ fontSize: 12, color: c.mutedFg, overflowWrap: "anywhere" }}>
                         {issue.project.name} · {fmt(issue.events)} events · {fmt(issue.users)} users
                         {link ? ` · ${link.identifier ?? "task"} ${link.status.replace("_", " ")}` : ""}
                       </span>

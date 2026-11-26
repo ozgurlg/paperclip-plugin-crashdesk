@@ -28,7 +28,7 @@ test("parseIssue maps the Sentry fields", () => {
   assert.equal(issue.events, 48);
   assert.equal(issue.users, 31);
   assert.equal(issue.level, "error");
-  assert.equal(issue.project.name, "Shop App");
+  assert.equal(issue.project.name, "shop-app");
   assert.equal(issue.isNew, true);
   assert.equal(issue.isRegression, false);
   assert.equal(issue.trend.length, 24);

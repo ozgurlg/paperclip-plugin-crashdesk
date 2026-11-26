@@ -158,7 +158,8 @@ export function parseIssue(raw: unknown, period: ListOptions["period"], now: num
     title: str(o.title, "(untitled issue)"),
     culprit: str(o.culprit),
     level: LEVELS.includes(level) ? level : "error",
-    project: { id: str(project.id), slug: str(project.slug), name: str(project.name, str(project.slug)) },
+    // Sentry's own UI labels projects by slug; the name field is often a leftover platform name.
+    project: { id: str(project.id), slug: str(project.slug), name: str(project.slug) || str(project.name) },
     events: num(o.count),
     users: num(o.userCount),
     firstSeen,

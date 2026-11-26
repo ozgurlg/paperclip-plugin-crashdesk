@@ -31,12 +31,12 @@ Sentry is already great at showing errors. What it cannot do is say "Software En
 ## How a task looks
 
 ```markdown
-Fix SHOP-APP-1A: TypeError: undefined is not an object (evaluating 'cart.items')
+Fix SHOP-APP-1A: TypeError in shop-app
 
 An error reported by Sentry needs a fix.
 
 - Issue: SHOP-APP-1A (link)
-- Project: Shop App
+- Project: shop-app
 - Level: error
 - Events: 48 · Users affected: 31
 - First seen: 2026-11-26T06:00:00Z · Last seen: 2026-11-26T11:57:00Z
@@ -111,6 +111,7 @@ The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (o
 Error messages, file names and tags are written by your app and, indirectly, by its users. Someone can trigger an error whose message reads like an instruction. Crashdesk treats all of it as untrusted:
 
 - Error text only ever appears inside one `<untrusted-error-report>` block, with a note telling the agent to treat it as data.
+- The task title never contains the error message: only the short id, the exception type and the project slug, each checked to be a plain name.
 - Every value is cut to a fixed length and flattened to one line. Control characters, code fences and block markers are removed, so a crafted message cannot close the block and add text outside it.
 - Only http(s) links from Sentry become links.
 - The token is resolved from Paperclip's secret store, never logged, and never shown in error messages.

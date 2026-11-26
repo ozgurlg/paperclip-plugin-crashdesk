@@ -37,8 +37,23 @@ export function sanitize(value: string | null | undefined, maxLength: number): s
   return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1)}…` : cleaned;
 }
 
+/** Keep only identifier-like characters; anything else means the value is not a plain name. */
+function identifier(value: string | null | undefined, maxLength: number): string | null {
+  const trimmed = (value ?? "").trim();
+  return /^[A-Za-z0-9_.$:-]+$/.test(trimmed) && trimmed.length <= maxLength ? trimmed : null;
+}
+
+/**
+ * The title sits outside the untrusted block and is the first thing an agent
+ * reads, so it never carries the error message. Only the short id, the
+ * exception type and the project slug, each checked to be a plain name.
+ * Example: "Fix SHOP-APP-1A: TypeError in shop-app".
+ */
 export function buildTaskTitle(detail: ErrorIssueDetail): string {
-  return `Fix ${detail.issue.shortId}: ${sanitize(detail.issue.title, 140)}`;
+  const id = identifier(detail.issue.shortId, 40) ?? identifier(detail.issue.id, 40) ?? "error";
+  const kind = identifier(detail.exceptionType, 80) ?? detail.issue.level;
+  const project = identifier(detail.issue.project.slug, 60);
+  return `Fix ${id}: ${kind}${project ? ` in ${project}` : ""}`;
 }
 
 function safeUrl(url: string): string | null {

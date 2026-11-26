@@ -9,9 +9,17 @@ import {
 } from "@paperclipai/plugin-sdk";
 import { CONFIG_KEYS, parseConfig, readConfig, type CrashdeskConfig } from "./config.ts";
 import { ACTION_KEYS, DATA_KEYS, DEFAULTS, JOB_KEYS, ORIGIN_KIND, PERIODS, TOOL_NAMES, type Period } from "./constants.ts";
-import { createSentryProvider } from "./providers/sentry.ts";
+import { DEFAULT_PROVIDER, createProvider } from "./providers/index.ts";
 import { ProviderError, type ErrorIssue, type ErrorProvider } from "./providers/types.ts";
-import { buildTaskDescription, buildTaskTitle, originIdFor, sanitize } from "./task.ts";
+import {
+  buildTaskDescription,
+  buildTaskTitle,
+  buildTriageDescription,
+  buildTriageTitle,
+  originIdFor,
+  sanitize,
+  triageOriginIdFor,
+} from "./task.ts";
 import {
   assigneeIds,
   cleanAssignee,
@@ -32,6 +40,8 @@ import {
 // ---------------------------------------------------------------------------
 
 interface Snapshot {
+  /** Name of the tracker the list came from, e.g. "Sentry". Older snapshots have none. */
+  provider?: string;
   period: Period;
   fetchedAt: string;
   ok: boolean;
@@ -102,14 +112,10 @@ async function getProvider(ctx: PluginContext, companyId: string): Promise<Setup
     return { problem: token.problem };
   }
   noteHealth(companyId, { problem: null });
-  const provider = createSentryProvider({
+  const provider = createProvider(DEFAULT_PROVIDER, {
     baseUrl: config.sentryUrl,
     organization: config.organization,
     token: token.token,
-    // Every project and environment the token can see; filtering by them
-    // comes with the pick-list settings page in v0.2.
-    projects: [],
-    environment: null,
     fetch: (url, init) => ctx.http.fetch(url, init),
   });
   return { provider, config };
@@ -166,7 +172,7 @@ async function runRefresh(
   let snapshot: Snapshot;
   try {
     const issues = await setup.provider.listIssues({ period, limit: DEFAULTS.issueLimit });
-    snapshot = { period, fetchedAt: new Date().toISOString(), ok: true, error: null, issues };
+    snapshot = { provider: setup.provider.displayName, period, fetchedAt: new Date().toISOString(), ok: true, error: null, issues };
     noteHealth(companyId, { syncError: null });
   } catch (err) {
     const message = errorMessage(err);
@@ -174,7 +180,14 @@ async function runRefresh(
     noteHealth(companyId, { syncError: message });
     // Keep the last good list visible; only mark it as failed.
     const previous = await readSnapshot(ctx, companyId, period);
-    snapshot = { period, fetchedAt: new Date().toISOString(), ok: false, error: message, issues: previous?.issues ?? [] };
+    snapshot = {
+      provider: setup.provider.displayName,
+      period,
+      fetchedAt: new Date().toISOString(),
+      ok: false,
+      error: message,
+      issues: previous?.issues ?? [],
+    };
   }
   await ctx.state.set(stateKey(companyId, period), snapshot);
   return snapshot;
@@ -203,14 +216,18 @@ async function linkedTasks(ctx: PluginContext, companyId: string): Promise<Recor
     if (!originId) continue;
     // Keep the most useful task when one error was linked twice: an open one wins.
     const existing = links[originId];
-    const isOpen = issue.status !== "done" && issue.status !== "cancelled";
-    if (existing && !(isOpen && (existing.status === "done" || existing.status === "cancelled"))) continue;
+    const open = issue.status !== "done" && issue.status !== "cancelled";
+    if (existing && !(open && (existing.status === "done" || existing.status === "cancelled"))) continue;
     links[originId] = {
       id: issue.id,
       identifier: (issue as { identifier?: string | null }).identifier ?? null,
       status: issue.status,
       title: issue.title,
     };
+  }
+  // An error fixed together with another one shows that error's task.
+  for (const [from, to] of Object.entries(await readGroups(ctx, companyId))) {
+    if (!links[from] && links[to]) links[from] = links[to]!;
   }
   return links;
 }
@@ -273,6 +290,45 @@ async function seenSentryProjects(ctx: PluginContext, companyId: string): Promis
 }
 
 // ---------------------------------------------------------------------------
+// Grouped errors: one fix task can cover several errors with one root cause.
+// A task has a single origin, so the other errors point at the first one here.
+// ---------------------------------------------------------------------------
+
+const groupKey = (companyId: string) => ({
+  scopeKind: "company" as const,
+  scopeId: companyId,
+  stateKey: "grouped-errors",
+});
+
+/** origin id of a grouped error → origin id of the error its task was created for. */
+async function readGroups(ctx: PluginContext, companyId: string): Promise<Record<string, string>> {
+  const raw = await ctx.state.get(groupKey(companyId));
+  const groups: Record<string, string> = {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return groups;
+  for (const [from, to] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof to === "string") groups[from] = to;
+  }
+  return groups;
+}
+
+const isOpen = (task: LinkedTask | undefined) => Boolean(task) && task!.status !== "done" && task!.status !== "cancelled";
+
+const ERROR_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+function priorityFor(level: ErrorIssue["level"]): Priority {
+  return level === "fatal" ? "critical" : level === "error" ? "high" : "medium";
+}
+
+function toLinked(task: { id: string; status: string; title: string }): LinkedTask {
+  return {
+    id: task.id,
+    identifier: (task as { identifier?: string | null }).identifier ?? null,
+    status: task.status,
+    title: task.title,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -292,12 +348,14 @@ const plugin: PaperclipPlugin = definePlugin({
       ]);
       return {
         configured: true,
-        provider: "Sentry",
+        provider: result.provider ?? "Sentry",
         snapshot: result,
+        // "" until someone picks who gets errors; the page asks for it first.
+        defaultAssignee: fallback,
         // Both keyed by provider issue id for the UI.
         links: Object.fromEntries(
           result.issues.flatMap((issue) => {
-            const link = links[originIdFor("sentry", issue.id)];
+            const link = links[originIdFor(DEFAULT_PROVIDER, issue.id)];
             return link ? [[issue.id, link]] : [];
           }),
         ),
@@ -361,6 +419,74 @@ const plugin: PaperclipPlugin = definePlugin({
       return { saved: Object.keys(map).length };
     });
 
+    ctx.actions.register(ACTION_KEYS.saveDefaultAssignee, async (params, actionCtx) => {
+      const companyId = asCompanyId(params.companyId, actionCtx.companyId);
+      if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
+      const assignee = cleanAssignee(params.assignee);
+      await ctx.state.set(fallbackAssigneeKey(companyId), assignee);
+      return { assignee };
+    });
+
+    // One triage task per tracker project, so each lands with whoever owns that code.
+    ctx.actions.register(ACTION_KEYS.triage, async (params, actionCtx) => {
+      const companyId = asCompanyId(params.companyId, actionCtx.companyId);
+      if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
+      const period = asPeriod(params.period);
+      const only = typeof params.projectSlug === "string" && params.projectSlug !== "all" ? params.projectSlug : null;
+
+      const setup = await getProvider(ctx, companyId);
+      if ("problem" in setup) throw new Error(SETUP_MESSAGES[setup.problem]);
+      const snapshot = await freshSnapshot(ctx, companyId, period);
+      if ("problem" in snapshot) throw new Error(SETUP_MESSAGES[snapshot.problem]);
+
+      const [links, projects, map, fallback] = await Promise.all([
+        linkedTasks(ctx, companyId),
+        paperclipProjects(ctx, companyId),
+        readProjectMap(ctx, companyId),
+        readFallbackAssignee(ctx, companyId),
+      ]);
+
+      const bySlug = new Map<string, ErrorIssue[]>();
+      for (const issue of snapshot.issues) {
+        if (only && issue.project.slug !== only) continue;
+        if (isOpen(links[originIdFor(setup.provider.id, issue.id)])) continue;
+        bySlug.set(issue.project.slug, [...(bySlug.get(issue.project.slug) ?? []), issue]);
+      }
+
+      const created: Array<{ project: string; errors: number; task: LinkedTask }> = [];
+      const skipped: Array<{ project: string; reason: string; task?: LinkedTask }> = [];
+      for (const [slug, issues] of bySlug) {
+        const originId = triageOriginIdFor(setup.provider.id, slug);
+        const running = links[originId];
+        if (running && isOpen(running)) {
+          skipped.push({ project: slug, reason: "already being triaged", task: running });
+          continue;
+        }
+        const target = resolveTarget(issues[0]!.project, map, projects, fallback);
+        const who = assigneeIds(target.assignee);
+        if (!who.assigneeAgentId && !who.assigneeUserId) {
+          skipped.push({ project: slug, reason: "no assignee: pick a default assignee under Routing" });
+          continue;
+        }
+        const task = await ctx.issues.create({
+          companyId,
+          projectId: target.project?.id ?? undefined,
+          title: buildTriageTitle(issues.length, slug),
+          description: buildTriageDescription(issues, slug, setup.provider.displayName, period),
+          status: "todo",
+          priority: issues.some((i) => i.level === "fatal") ? "high" : "medium",
+          assigneeAgentId: who.assigneeAgentId,
+          assigneeUserId: who.assigneeAgentId ? undefined : who.assigneeUserId,
+          originKind: ORIGIN_KIND,
+          originId,
+          actor: { actorUserId: actionCtx.actor.userId ?? null },
+        });
+        ctx.logger.info("Created triage task", { companyId, project: slug, errors: issues.length, taskId: task.id });
+        created.push({ project: slug, errors: issues.length, task: toLinked(task) });
+      }
+      return { created, skipped };
+    });
+
     ctx.actions.register(ACTION_KEYS.refresh, async (params, actionCtx) => {
       const companyId = asCompanyId(params.companyId, actionCtx.companyId);
       if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
@@ -375,7 +501,7 @@ const plugin: PaperclipPlugin = definePlugin({
       if (!companyId) throw new Error(SETUP_MESSAGES["no-company"]);
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(issueId)) throw new Error("Unknown error id.");
 
-      const originId = originIdFor("sentry", issueId);
+      const originId = originIdFor(DEFAULT_PROVIDER, issueId);
       const existing = (await linkedTasks(ctx, companyId))[originId];
       if (existing && existing.status !== "done" && existing.status !== "cancelled") {
         return { created: false, task: existing };
@@ -393,11 +519,7 @@ const plugin: PaperclipPlugin = definePlugin({
 
       const priority: Priority = PRIORITIES.includes(params.priority as Priority)
         ? (params.priority as Priority)
-        : detail.issue.level === "fatal"
-          ? "critical"
-          : detail.issue.level === "error"
-            ? "high"
-            : "medium";
+        : priorityFor(detail.issue.level);
       // An explicit choice (even "none", sent as "") wins; callers that send
       // nothing get the mapped project and that project's assignee (or the fallback).
       const target = resolveTarget(
@@ -479,7 +601,7 @@ const plugin: PaperclipPlugin = definePlugin({
         if ("problem" in result) return { error: SETUP_MESSAGES[result.problem] };
         const links = await linkedTasks(ctx, runCtx.companyId);
         const rows = result.issues.map((issue) => {
-          const link = links[originIdFor("sentry", issue.id)];
+          const link = links[originIdFor(DEFAULT_PROVIDER, issue.id)];
           return {
             id: issue.id,
             shortId: issue.shortId,
@@ -532,6 +654,95 @@ const plugin: PaperclipPlugin = definePlugin({
         } catch (err) {
           return { error: errorMessage(err) };
         }
+      },
+    );
+
+    ctx.tools.register(
+      TOOL_NAMES.createErrorTask,
+      {
+        displayName: "Create a fix task for app errors",
+        description:
+          "Creates one Paperclip fix task for one error, or for several errors that share a root cause, and links them to it. " +
+          "The task goes to the project and assignee set in Crashdesk's routing.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            ids: {
+              type: "array",
+              items: { type: "string" },
+              minItems: 1,
+              maxItems: 10,
+              description: "Error ids from list-errors. The first one is the main error; the rest share its root cause.",
+            },
+            parentTaskId: { type: "string", description: "Id of the triage task this fix belongs to, if any." },
+          },
+          required: ["ids"],
+        },
+      },
+      async (params, runCtx): Promise<ToolResult> => {
+        const p = (params ?? {}) as { ids?: unknown; parentTaskId?: unknown };
+        const ids = Array.isArray(p.ids) ? [...new Set(p.ids.map((v) => String(v).trim()))] : [];
+        if (ids.length === 0 || ids.length > 10 || !ids.every((id) => ERROR_ID.test(id))) {
+          return { error: "Pass 1 to 10 error ids from list-errors." };
+        }
+        const companyId = runCtx.companyId;
+        const setup = await getProvider(ctx, companyId);
+        if ("problem" in setup) return { error: SETUP_MESSAGES[setup.problem] };
+
+        const links = await linkedTasks(ctx, companyId);
+        const covered = ids.filter((id) => isOpen(links[originIdFor(setup.provider.id, id)]));
+        if (covered.length > 0) {
+          const first = links[originIdFor(setup.provider.id, covered[0]!)]!;
+          return { error: `Already has an open task (${first.identifier ?? first.id}): ${covered.join(", ")}. Leave those out.` };
+        }
+
+        let details;
+        try {
+          details = await Promise.all(ids.map((id) => setup.provider.getIssue(id, "24h")));
+        } catch (err) {
+          return { error: errorMessage(err) };
+        }
+        const main = details[0]!;
+        const target = resolveTarget(
+          main.issue.project,
+          await readProjectMap(ctx, companyId),
+          await paperclipProjects(ctx, companyId),
+          await readFallbackAssignee(ctx, companyId),
+        );
+        const who = assigneeIds(target.assignee);
+        const parentId =
+          typeof p.parentTaskId === "string" && /^[0-9a-f-]{36}$/i.test(p.parentTaskId) ? p.parentTaskId : undefined;
+        const input = {
+          companyId,
+          projectId: target.project?.id ?? undefined,
+          title: buildTaskTitle(main),
+          description: buildTaskDescription(main, setup.provider.displayName, details.slice(1)),
+          status: "todo" as const,
+          priority: priorityFor(main.issue.level),
+          assigneeAgentId: who.assigneeAgentId,
+          assigneeUserId: who.assigneeAgentId ? undefined : who.assigneeUserId,
+          originKind: ORIGIN_KIND,
+          originId: originIdFor(setup.provider.id, ids[0]!),
+        };
+        let task;
+        try {
+          task = await ctx.issues.create({ ...input, parentId });
+        } catch (err) {
+          if (!parentId) throw err;
+          // A parent the host does not accept must not lose the fix task.
+          task = await ctx.issues.create(input);
+        }
+        if (ids.length > 1) {
+          const groups = await readGroups(ctx, companyId);
+          for (const id of ids.slice(1)) groups[originIdFor(setup.provider.id, id)] = input.originId;
+          await ctx.state.set(groupKey(companyId), groups);
+        }
+        ctx.logger.info("Agent created task for errors", { companyId, ids, taskId: task.id, agentId: runCtx.agentId });
+        const linked = toLinked(task);
+        return {
+          content: `Created ${linked.identifier ?? linked.id} for ${ids.length} error(s): ${ids.join(", ")}.`,
+          data: { task: linked, ids },
+        };
       },
     );
 

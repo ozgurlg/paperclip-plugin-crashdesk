@@ -51,11 +51,13 @@ type Overview =
       links: Record<string, LinkedTask>;
       /** Where each error's task goes, keyed by issue id. */
       targets?: Record<string, Target>;
+      /** "" until someone picks who gets errors. */
+      defaultAssignee?: string;
     };
 
 const PAGE_PATH = "/crashdesk";
 
-/** Where an error's task goes, as the Projects panel decides it. */
+/** Where an error's task goes, as the routing decides it. */
 interface Target {
   /** "" when there is no project. */
   projectId: string;
@@ -64,7 +66,7 @@ interface Target {
   projectSource: "mapping" | "name" | null;
   /** In the picker encoding ("agent:<id>", "user:<id>"), or "". */
   assignee: string;
-  /** The Sentry project's own assignee, or the fallback for all projects. */
+  /** The tracker project's own assignee, or the default for all projects. */
   assigneeSource: "project" | "fallback" | null;
 }
 
@@ -149,43 +151,66 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: c.mutedFg,
 };
 
+// Layout rules live here, not in inline styles, so they can change with the
+// width: one column on a phone, a table-like grid on a desktop.
 const CSS = `
-.cd-root { color: ${c.fg}; font-size: 14px; }
+.cd-root { color: ${c.fg}; font-size: 14px; min-width: 0; box-sizing: border-box; }
+.cd-root *, .cd-root *::before { box-sizing: border-box; }
 .cd-root button { font: inherit; }
-.cd-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
-.cd-table-wrap { overflow-x: auto; border: 1px solid ${c.border}; }
-.cd-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 13px; }
-.cd-table th { text-align: left; font-weight: 500; color: ${c.mutedFg}; padding: 10px 14px; border-bottom: 1px solid ${c.border}; }
-.cd-table td { padding: 12px 14px; border-bottom: 1px solid ${c.border}; vertical-align: top; }
-.cd-table tr:last-child td { border-bottom: 0; }
-.cd-btn { display: inline-flex; align-items: center; gap: 6px; border-radius: ${c.radius}; padding: 6px 12px; cursor: pointer; border: 1px solid ${c.input}; background: transparent; color: ${c.fg}; white-space: nowrap; }
+.cd-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: ${c.radius}; padding: 7px 12px; cursor: pointer; border: 1px solid ${c.input}; background: transparent; color: ${c.fg}; white-space: nowrap; }
 .cd-btn:hover:not(:disabled) { background: ${c.muted}; }
 .cd-btn:disabled { opacity: .55; cursor: default; }
 .cd-btn-primary { background: ${c.primary}; color: ${c.primaryFg}; border-color: transparent; }
 .cd-btn-primary:hover:not(:disabled) { background: ${c.primary}; opacity: .9; }
 .cd-seg { display: inline-flex; border: 1px solid ${c.input}; border-radius: ${c.radius}; overflow: hidden; }
-.cd-seg button { border: 0; background: transparent; color: ${c.mutedFg}; padding: 6px 12px; cursor: pointer; }
+.cd-seg button { border: 0; background: transparent; color: ${c.mutedFg}; padding: 7px 12px; cursor: pointer; }
 .cd-seg button[aria-pressed="true"] { background: ${c.muted}; color: ${c.fg}; }
-.cd-select { background: transparent; color: ${c.fg}; border: 1px solid ${c.input}; border-radius: ${c.radius}; padding: 6px 8px; font: inherit; font-size: 13px; }
+.cd-select { background: transparent; color: ${c.fg}; border: 1px solid ${c.input}; border-radius: ${c.radius}; padding: 7px 8px; font: inherit; font-size: 13px; max-width: 100%; }
 .cd-select option { background: ${c.card}; color: ${c.fg}; }
 .cd-link { color: inherit; text-decoration: none; }
 .cd-link:hover { text-decoration: underline; }
 .cd-nav { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: ${c.radius}; color: inherit; text-decoration: none; font-size: 14px; }
 .cd-nav:hover { background: var(--sidebar-accent, ${c.muted}); }
-@media (max-width: 768px) {
-  .cd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; }
-  .cd-tile-value { font-size: 28px !important; }
-  .cd-issues-wrap { border: 0; overflow: visible; }
-  .cd-issues { min-width: 0 !important; display: block; }
-  .cd-issues thead { display: none; }
-  .cd-issues tbody { display: flex; flex-direction: column; gap: 12px; }
-  .cd-issues tr { display: block; border: 1px solid ${c.border}; }
-  .cd-issues td { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 0; padding: 8px 14px; text-align: left !important; }
-  .cd-issues td:first-child { display: block; padding-top: 12px; min-width: 0; overflow-wrap: anywhere; }
-  .cd-issues td[data-label]::before { content: attr(data-label); color: ${c.mutedFg}; font-size: 12px; flex-shrink: 0; }
-  .cd-issues td:last-child { padding-bottom: 12px; }
-  .cd-issues td[colspan] { display: block; }
+.cd-card { border: 1px solid ${c.border}; border-radius: ${c.radius}; background: ${c.card}; }
+.cd-badge { display: inline-flex; align-items: center; gap: 5px; border: 1px solid ${c.input}; border-radius: 999px; padding: 1px 8px; font-size: 11px; line-height: 1.5; white-space: nowrap; }
+.cd-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.cd-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.cd-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cd-stat { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 14px 16px; border: 1px solid ${c.border}; border-radius: ${c.radius}; background: ${c.card}; color: inherit; cursor: pointer; min-width: 0; }
+.cd-stat:hover { border-color: ${c.mutedFg}; }
+.cd-stat[aria-pressed="true"] { border-color: ${c.fg}; }
+.cd-stat-value { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.cd-stat-label { font-size: 14px; }
+.cd-stat-sub { font-size: 12px; color: ${c.mutedFg}; overflow-wrap: anywhere; }
+
+.cd-list { border: 1px solid ${c.border}; border-radius: ${c.radius}; background: ${c.card}; overflow: hidden; }
+.cd-row, .cd-list-head { display: grid; grid-template-columns: minmax(0, 1fr) 150px 56px 210px; grid-template-areas: "main events users task"; column-gap: 20px; padding: 14px 16px; align-items: start; }
+.cd-list-head { padding-top: 10px; padding-bottom: 10px; font-size: 12px; color: ${c.mutedFg}; border-bottom: 1px solid ${c.border}; }
+.cd-row + .cd-row, .cd-row-form + .cd-row { border-top: 1px solid ${c.border}; }
+.cd-row-main { grid-area: main; min-width: 0; display: flex; gap: 10px; }
+.cd-row-events { grid-area: events; }
+.cd-row-users { grid-area: users; text-align: right; }
+.cd-row-task { grid-area: task; min-width: 0; }
+.cd-cell-label { display: none; font-size: 11px; color: ${c.mutedFg}; margin-bottom: 2px; }
+.cd-row-form { padding: 12px 16px; background: ${c.muted}; border-top: 1px solid ${c.border}; }
+
+.cd-map-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.3fr); gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid ${c.border}; }
+.cd-map-label { display: none; font-size: 11px; color: ${c.mutedFg}; margin-bottom: 4px; }
+
+@media (max-width: 860px) {
+  .cd-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .cd-stat { padding: 12px; }
+  .cd-list-head { display: none; }
+  .cd-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "main main" "events users" "task task"; row-gap: 12px; }
+  .cd-cell-label { display: block; }
+  .cd-row-task > * { width: 100%; }
+  .cd-row-task .cd-btn-wide { flex: 1; }
+  .cd-map-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .cd-map-label { display: block; }
+  .cd-toolbar-grow { flex: 1 1 100%; }
 }
+@keyframes cd-spin { to { transform: rotate(360deg); } }
 `;
 
 // ---------------------------------------------------------------------------
@@ -204,6 +229,11 @@ function timeAgo(iso: string): string {
 }
 
 const fmt = (n: number) => new Intl.NumberFormat("en", { notation: "compact" }).format(n);
+const plural = (n: number, word: string) => `${fmt(n)} ${word}${n === 1 ? "" : "s"}`;
+
+/** A task that is still being worked on covers its error; a finished or cancelled one does not. */
+const isOpenTask = (task: LinkedTask | undefined): task is LinkedTask =>
+  Boolean(task) && task!.status !== "done" && task!.status !== "cancelled";
 
 function BugIcon({ size = 16 }: { size?: number }) {
   return (
@@ -211,6 +241,15 @@ function BugIcon({ size = 16 }: { size?: number }) {
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
       <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+    </svg>
+  );
+}
+
+function CheckIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8.5 12 2.5 2.5 4.5-5" />
     </svg>
   );
 }
@@ -239,16 +278,17 @@ function Dot({ color, label }: { color: string; label?: string }) {
 function Sparkline({ values, hot }: { values: number[]; hot: boolean }) {
   const max = Math.max(1, ...values);
   const total = values.reduce((a, b) => a + b, 0);
+  const recent = values.length - Math.ceil(values.length / 4);
   return (
     <div role="img" aria-label={`${total} events over the period`} style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 22 }}>
       {values.map((v, i) => (
         <span
           key={i}
           style={{
-            width: 4,
+            width: 3,
             height: Math.max(2, Math.round((v / max) * 22)),
-            background: hot && i >= values.length - Math.ceil(values.length / 4) ? c.destructive : c.mutedFg,
-            opacity: hot && i >= values.length - Math.ceil(values.length / 4) ? 1 : 0.45,
+            background: hot && i >= recent ? c.destructive : c.mutedFg,
+            opacity: hot && i >= recent ? 1 : 0.45,
           }}
         />
       ))}
@@ -256,26 +296,26 @@ function Sparkline({ values, hot }: { values: number[]; hot: boolean }) {
   );
 }
 
-function Tile({ value, label, sub, icon }: { value: string; label: string; sub: string; icon: ReactNode }) {
+const sectionTitle: CSSProperties = { margin: 0, fontSize: 15, fontWeight: 600 };
+const hint: CSSProperties = { margin: 0, fontSize: 13, color: c.mutedFg, lineHeight: 1.5 };
+
+function Banner({ tone, children }: { tone: "error" | "info"; children: ReactNode }) {
   return (
-    <div style={{ padding: "16px clamp(8px, 2vw, 20px)", display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <span className="cd-tile-value" style={{ fontSize: 34, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{value}</span>
-        <span style={{ color: c.mutedFg }}>{icon}</span>
-      </div>
-      <span style={{ fontSize: 15 }}>{label}</span>
-      <span style={{ fontSize: 13, color: c.mutedFg }}>{sub}</span>
+    <div
+      role={tone === "error" ? "alert" : "status"}
+      style={{
+        border: `1px solid ${tone === "error" ? c.destructive : c.border}`,
+        borderRadius: c.radius,
+        color: tone === "error" ? c.destructive : c.fg,
+        padding: "10px 14px",
+        fontSize: 13,
+        overflowWrap: "anywhere",
+      }}
+    >
+      {children}
     </div>
   );
 }
-
-const sectionTitle: CSSProperties = {
-  margin: 0,
-  fontSize: 14,
-  fontWeight: 600,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-};
 
 // ---------------------------------------------------------------------------
 // Task cell: linked task chip, or "Create task" with an inline form
@@ -283,26 +323,24 @@ const sectionTitle: CSSProperties = {
 
 function TaskChip({ task }: { task: LinkedTask }) {
   const companyLink = useCompanyLink();
-  const label = `${task.identifier ?? "Task"} · ${task.status.replace("_", " ")}`;
   return (
     <a
       {...companyLink(`/issues/${encodeURIComponent(task.identifier ?? task.id)}`)}
-      className="cd-link"
+      className="cd-link cd-badge"
       title={task.title}
-      style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${c.input}`, borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}
+      style={{ fontSize: 12, padding: "3px 10px", alignSelf: "flex-start", width: "auto" }}
     >
       <Dot color={STATUS_COLOR[task.status] ?? c.mutedFg} />
-      {label}
+      {task.identifier ?? "Task"} · {task.status.replace("_", " ")}
     </a>
   );
 }
 
 /**
- * With a saved project and an assignee (the project's own or the fallback) the
- * task is one click: the worker fills in project, assignee and a priority from
- * the error level.
- * "⋯" still opens the form for a one-off change. Without a complete mapping
- * the button opens the form, because there is something to choose.
+ * With an assignee (the project's own or the default) the task is one click:
+ * the worker fills in project, assignee and a priority from the error level.
+ * "⋯" still opens the form for a one-off change. Without an assignee the
+ * button opens the form, because there is something to choose.
  */
 function CreateTaskButton({
   companyId,
@@ -324,13 +362,15 @@ function CreateTaskButton({
   const createTask = usePluginAction("create-task");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ready = target?.projectSource === "mapping" && Boolean(target.projectId) && Boolean(target.assignee);
+  const ready = Boolean(target?.assignee);
 
   if (!ready) {
     return (
-      <button type="button" className={formOpen ? "cd-btn" : "cd-btn cd-btn-primary"} onClick={onToggleForm} aria-expanded={formOpen}>
-        {label}
-      </button>
+      <div style={{ display: "flex" }}>
+        <button type="button" className={`cd-btn cd-btn-wide${formOpen ? "" : " cd-btn-primary"}`} onClick={onToggleForm} aria-expanded={formOpen}>
+          {label}
+        </button>
+      </div>
     );
   }
 
@@ -338,7 +378,7 @@ function CreateTaskButton({
     setBusy(true);
     setError(null);
     try {
-      // No project, assignee or priority: the worker uses the mapping and the error level.
+      // No project, assignee or priority: the worker uses the routing and the error level.
       await createTask({ companyId, issueId: issue.id });
       onCreated();
     } catch (err) {
@@ -349,18 +389,15 @@ function CreateTaskButton({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", gap: 6 }}>
-        <button type="button" className="cd-btn cd-btn-primary" onClick={() => void createNow()} disabled={busy}>
+        <button type="button" className="cd-btn cd-btn-primary cd-btn-wide" onClick={() => void createNow()} disabled={busy}>
           {busy ? "Creating…" : label}
         </button>
         <button type="button" className="cd-btn" onClick={onToggleForm} aria-expanded={formOpen} aria-label="Choose project, assignee and priority" title="Choose project, assignee and priority" disabled={busy}>
           ⋯
         </button>
       </div>
-      <span style={{ fontSize: 11, color: c.mutedFg }}>
-        → {target!.projectName} · {target!.assigneeSource === "project" ? "project assignee" : "fallback assignee"}
-      </span>
       {error && (
         <span role="alert" style={{ fontSize: 12, color: c.destructive }}>
           {error}
@@ -384,7 +421,7 @@ function CreateTaskForm({
   onCancel: () => void;
 }) {
   const createTask = usePluginAction("create-task");
-  // Start with what the Projects panel decides; every field can be changed for this task.
+  // Start with what the routing decides; every field can be changed for this task.
   const [assignee, setAssignee] = useState(target?.assignee ?? "");
   const [assigneeIds, setAssigneeIds] = useState(splitAssignee(target?.assignee ?? ""));
   const [projectId, setProjectId] = useState(target?.projectId ?? "");
@@ -411,9 +448,10 @@ function CreateTaskForm({
     }
   }
 
+  const field: CSSProperties = { display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg, flex: "1 1 200px", minWidth: 0 };
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end", padding: "4px 0 6px" }}>
-      <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg, minWidth: 220 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+      <label style={field}>
         Assignee
         <AssigneePicker
           companyId={companyId}
@@ -425,24 +463,12 @@ function CreateTaskForm({
             setAssigneeIds({ agent: selection.assigneeAgentId, user: selection.assigneeUserId });
           }}
         />
-        {target?.assignee && assignee === target.assignee && (
-          <span style={{ fontSize: 11 }}>
-            {target.assigneeSource === "project" ? `Assignee for ${issue.project.slug}` : "Fallback assignee"}
-          </span>
-        )}
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg, minWidth: 200 }}>
+      <label style={field}>
         Project
         <ProjectPicker companyId={companyId} value={projectId} onChange={setProjectId} placeholder="No project" noneLabel="No project" />
-        {target?.projectSource && target.projectId && projectId === target.projectId && (
-          <span style={{ fontSize: 11 }}>
-            {target.projectSource === "mapping"
-              ? `From your project mapping for ${issue.project.slug}`
-              : `Suggested by name. Save it under Projects at the top of this page.`}
-          </span>
-        )}
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg }}>
+      <label style={{ ...field, flex: "0 1 140px" }}>
         Priority
         <select className="cd-select" value={priority} onChange={(e) => setPriority(e.target.value)}>
           <option value="critical">Critical</option>
@@ -469,14 +495,233 @@ function CreateTaskForm({
 }
 
 // ---------------------------------------------------------------------------
+// One error in the list
+// ---------------------------------------------------------------------------
+
+function IssueRow({
+  issue,
+  period,
+  action,
+  form,
+}: {
+  issue: ErrorIssue;
+  period: Period;
+  action: ReactNode;
+  form: ReactNode;
+}) {
+  const hot = issue.isNew || issue.isRegression;
+  return (
+    <>
+      <div className="cd-row">
+        <div className="cd-row-main">
+          <span style={{ marginTop: 6 }}>
+            <Dot color={LEVEL_COLOR[issue.level]} label={issue.level} />
+          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+            <a href={issue.url} target="_blank" rel="noopener noreferrer" className="cd-link cd-clamp" title={issue.title} style={{ fontFamily: c.mono, fontSize: 13 }}>
+              {issue.title}
+            </a>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px", fontSize: 12, color: c.mutedFg, minWidth: 0 }}>
+              {issue.isRegression && (
+                <span className="cd-badge" style={{ color: c.destructive, borderColor: c.destructive }}>
+                  Regression
+                </span>
+              )}
+              {issue.isNew && !issue.isRegression && (
+                <span className="cd-badge" style={{ color: c.fg }}>
+                  New
+                </span>
+              )}
+              <span>{issue.project.name}</span>
+              <span>· first seen {timeAgo(issue.firstSeen)}</span>
+              {issue.shortId && <span>· {issue.shortId}</span>}
+            </div>
+            {issue.culprit && (
+              <span style={{ fontSize: 12, color: c.mutedFg, overflowWrap: "anywhere" }}>{issue.culprit}</span>
+            )}
+          </div>
+        </div>
+        <div className="cd-row-events">
+          <div className="cd-cell-label">Events · {period}</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+            <Sparkline values={issue.trend} hot={hot} />
+            <span>{fmt(issue.events)}</span>
+          </div>
+        </div>
+        <div className="cd-row-users">
+          <div className="cd-cell-label">Users</div>
+          {fmt(issue.users)}
+        </div>
+        <div className="cd-row-task" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {action}
+        </div>
+      </div>
+      {form && <div className="cd-row-form">{form}</div>}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Triage: hand the errors nobody is on to an agent, one task per tracker project
+// ---------------------------------------------------------------------------
+
+interface TriageResult {
+  created: Array<{ project: string; errors: number; task: LinkedTask }>;
+  skipped: Array<{ project: string; reason: string; task?: LinkedTask }>;
+}
+
+function TriageBar({
+  companyId,
+  period,
+  project,
+  count,
+  onDone,
+}: {
+  companyId: string;
+  period: Period;
+  project: string;
+  count: number;
+  onDone: () => void;
+}) {
+  const triage = usePluginAction("triage");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<TriageResult | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult((await triage({ companyId, period, projectSlug: project })) as TriageResult);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start the triage.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (count === 0 && !result) return null;
+  return (
+    <section className="cd-card" aria-label="Triage" style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+      {count > 0 && (
+        <div className="cd-toolbar" style={{ gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: "1 1 260px", minWidth: 0 }}>
+            <strong style={{ fontWeight: 600 }}>{plural(count, "error")} without a task</strong>
+            <span style={hint}>
+              Let an agent sort them: it groups errors by root cause, opens a fix task for each one worth fixing and
+              skips the noise.
+            </span>
+          </div>
+          <button type="button" className="cd-btn cd-btn-primary" onClick={() => void run()} disabled={busy}>
+            {busy ? "Starting…" : "Triage with an agent"}
+          </button>
+        </div>
+      )}
+      {error && (
+        <span role="alert" style={{ fontSize: 13, color: c.destructive }}>
+          {error}
+        </span>
+      )}
+      {result && (
+        <div role="status" style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+          {result.created.map((r) => (
+            <div key={r.project} className="cd-toolbar">
+              <span>
+                Triage started for {plural(r.errors, "error")} in {r.project}:
+              </span>
+              <TaskChip task={r.task} />
+            </div>
+          ))}
+          {result.skipped.map((r) => (
+            <div key={r.project} className="cd-toolbar" style={{ color: c.mutedFg }}>
+              <span>
+                {r.project}: {r.reason}
+              </span>
+              {r.task && <TaskChip task={r.task} />}
+            </div>
+          ))}
+          {result.created.length === 0 && result.skipped.length === 0 && <span style={{ color: c.mutedFg }}>Nothing to triage.</span>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// First run: who gets errors
+// ---------------------------------------------------------------------------
+
+function DefaultAssigneeCard({ companyId, onSaved }: { companyId: string; onSaved: () => void }) {
+  const save = usePluginAction("save-default-assignee");
+  const [assignee, setAssignee] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSave() {
+    setBusy(true);
+    setError(null);
+    try {
+      await save({ companyId, assignee });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="cd-card" aria-label="Choose who gets errors" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <h2 style={sectionTitle}>Who should get errors?</h2>
+        <p style={hint}>
+          Pick the agent that tasks from errors go to. One choice is enough to start; later you can send single
+          projects to someone else under Routing.
+        </p>
+      </div>
+      <div className="cd-toolbar" style={{ alignItems: "flex-end" }}>
+        <div style={{ flex: "1 1 240px", maxWidth: 360, minWidth: 0 }}>
+          <AssigneePicker companyId={companyId} value={assignee} onChange={(value) => setAssignee(value)} placeholder="Choose an agent" noneLabel="Nobody" />
+        </div>
+        <button type="button" className="cd-btn cd-btn-primary" onClick={() => void onSave()} disabled={busy || !assignee}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+      {error && (
+        <span role="alert" style={{ fontSize: 13, color: c.destructive }}>
+          {error}
+        </span>
+      )}
+    </section>
+  );
+}
+
+function SetupCard({ message }: { message: string }) {
+  return (
+    <section className="cd-card" style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 720 }}>
+      <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Connect your error tracker</h2>
+      <p style={{ margin: 0, color: c.mutedFg }}>{message}</p>
+      <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6, lineHeight: 1.5 }}>
+        <li>In Sentry, create an internal integration with read access to Issue &amp; Event and copy its token.</li>
+        <li>In Paperclip, save that token as a company secret.</li>
+        <li>Open Settings → Plugins → Crashdesk, enter your organization slug and pick the secret.</li>
+      </ol>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
+type Filter = "all" | "new" | "untracked" | "tracked";
+
 export function CrashdeskPage({ context }: PluginPageProps) {
   const companyId = context.companyId;
-  const [showMapping, setShowMapping] = useState(false);
+  const [showRouting, setShowRouting] = useState(false);
   const [period, setPeriod] = useState<Period>("24h");
   const [project, setProject] = useState("all");
+  const [filter, setFilter] = useState<Filter>("all");
   const [openForm, setOpenForm] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -504,65 +749,67 @@ export function CrashdeskPage({ context }: PluginPageProps) {
     for (const i of issues) seen.set(i.project.slug, i.project.name);
     return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [issues]);
-  const visible = project === "all" ? issues : issues.filter((i) => i.project.slug === project);
+  const inProject = project === "all" ? issues : issues.filter((i) => i.project.slug === project);
 
   const stats = useMemo(() => {
-    // A cancelled task no longer covers its error, so it is not counted as linked.
-    const linked = visible
-      .map((i) => links[i.id])
-      .filter((l): l is LinkedTask => Boolean(l) && l!.status !== "cancelled");
-    const done = linked.filter((l) => l.status === "done").length;
+    const tracked = inProject.filter((i) => isOpenTask(links[i.id])).length;
     return {
-      unresolved: visible.length,
-      fresh: visible.filter((i) => i.isNew).length,
-      regressions: visible.filter((i) => i.isRegression).length,
-      users: visible.reduce((sum, i) => sum + i.users, 0),
-      linked: linked.length,
-      open: linked.length - done,
-      done,
+      all: inProject.length,
+      fresh: inProject.filter((i) => i.isNew || i.isRegression).length,
+      regressions: inProject.filter((i) => i.isRegression).length,
+      users: inProject.reduce((sum, i) => sum + i.users, 0),
+      tracked,
+      untracked: inProject.length - tracked,
     };
-  }, [visible, links]);
+  }, [inProject, links]);
+
+  const visible = inProject.filter((i) =>
+    filter === "new"
+      ? i.isNew || i.isRegression
+      : filter === "untracked"
+        ? !isOpenTask(links[i.id])
+        : filter === "tracked"
+          ? isOpenTask(links[i.id])
+          : true,
+  );
+
+  const tiles: Array<{ key: Filter; value: number; label: string; sub: string }> = [
+    { key: "all", value: stats.all, label: "Unresolved", sub: `${plural(stats.users, "user")} affected` },
+    {
+      key: "new",
+      value: stats.fresh,
+      label: "New",
+      sub: stats.regressions > 0 ? `${plural(stats.regressions, "regression")} included` : `first seen in the last ${period}`,
+    },
+    { key: "untracked", value: stats.untracked, label: "Without a task", sub: "nobody is on these yet" },
+    { key: "tracked", value: stats.tracked, label: "In progress", sub: "an open task covers these" },
+  ];
 
   return (
-    <div className="cd-root" style={{ padding: "24px clamp(16px, 3vw, 32px) 40px", maxWidth: 1200, minWidth: 0, display: "flex", flexDirection: "column", gap: 24 }}>
-      <style>{CSS + "@keyframes cd-spin { to { transform: rotate(360deg); } }"}</style>
+    <div className="cd-root" style={{ padding: "20px clamp(12px, 3vw, 32px) 40px", maxWidth: 1200, display: "flex", flexDirection: "column", gap: 16 }}>
+      <style>{CSS}</style>
 
-      <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, borderBottom: `1px solid ${c.border}`, paddingBottom: 16 }}>
-        <h1 style={{ ...sectionTitle, fontSize: 17, flexGrow: 1 }}>App Errors</h1>
-        {companyId && (
-          <button type="button" className="cd-btn" onClick={() => setShowMapping(!showMapping)} aria-expanded={showMapping}>
-            Projects
+      <header className="cd-toolbar" style={{ gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: "1 1 200px", minWidth: 0 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>App errors</h1>
+          <span style={{ fontSize: 13, color: c.mutedFg }}>
+            {data?.configured
+              ? `Most frequent unresolved errors from ${data.provider}`
+              : "Errors from your tracker, turned into tasks"}
+          </span>
+        </div>
+        {data?.configured && (
+          <button type="button" className="cd-btn" onClick={() => void syncNow()} disabled={refreshing} aria-label="Refresh now">
+            <RefreshIcon spinning={refreshing} />
+            {`Synced ${timeAgo(data.snapshot.fetchedAt)}`}
           </button>
         )}
-        {projects.length > 1 && (
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: c.mutedFg }}>
-            Project
-            <select className="cd-select" value={project} onChange={(e) => setProject(e.target.value)}>
-              <option value="all">All projects</option>
-              {projects.map(([slug, name]) => (
-                <option key={slug} value={slug}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
+        {companyId && data?.configured && (
+          <button type="button" className="cd-btn" onClick={() => setShowRouting(!showRouting)} aria-expanded={showRouting}>
+            Routing
+          </button>
         )}
-        <div className="cd-seg" role="group" aria-label="Time range">
-          {PERIODS.map((p) => (
-            <button key={p} type="button" aria-pressed={p === period} onClick={() => setPeriod(p)}>
-              {p}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="cd-btn" onClick={() => void syncNow()} disabled={refreshing} aria-label="Refresh now">
-          <RefreshIcon spinning={refreshing} />
-          {data?.configured ? `Synced ${timeAgo(data.snapshot.fetchedAt)}` : "Refresh"}
-        </button>
       </header>
-
-      {showMapping && companyId && (
-        <ProjectMappingPanel companyId={companyId} onClose={() => setShowMapping(false)} onSaved={refresh} />
-      )}
 
       {refreshError && <Banner tone="error">{refreshError}</Banner>}
       {error && <Banner tone="error">{error.message}</Banner>}
@@ -570,197 +817,127 @@ export function CrashdeskPage({ context }: PluginPageProps) {
 
       {data && !data.configured && <SetupCard message={data.setupMessage} />}
 
+      {data?.configured && companyId && !data.defaultAssignee && !showRouting && (
+        <DefaultAssigneeCard companyId={companyId} onSaved={refresh} />
+      )}
+
+      {showRouting && companyId && <RoutingPanel companyId={companyId} onClose={() => setShowRouting(false)} onSaved={refresh} />}
+
       {data?.configured && (
         <>
           {!data.snapshot.ok && data.snapshot.error && (
-            <Banner tone="error">
-              Last sync failed: {data.snapshot.error} Showing the last list that loaded.
-            </Banner>
+            <Banner tone="error">Last sync failed: {data.snapshot.error} Showing the last list that loaded.</Banner>
           )}
 
-          <div className="cd-tiles">
-            <Tile value={fmt(stats.unresolved)} label="Unresolved" sub={`top issues, last ${period}`} icon={<BugIcon size={18} />} />
-            <Tile
-              value={fmt(stats.fresh)}
-              label="New"
-              sub={stats.regressions > 0 ? `${stats.regressions} regression${stats.regressions === 1 ? "" : "s"}` : "first seen in this period"}
-              icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14" /><path d="M5 12h14" /></svg>}
-            />
-            <Tile
-              value={fmt(stats.users)}
-              label="Users Affected"
-              sub="summed across issues"
-              icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="8" r="4" /><path d="M2 21a7 7 0 0 1 14 0" /><path d="M17 4a4 4 0 0 1 0 8" /><path d="M22 21a7 7 0 0 0-4-6.3" /></svg>}
-            />
-            <Tile
-              value={fmt(stats.linked)}
-              label="Linked to Tasks"
-              sub={`${stats.open} open, ${stats.done} done`}
-              icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m9 12 2 2 4-4" /></svg>}
-            />
+          <div className="cd-stats">
+            {tiles.map((t) => (
+              <button key={t.key} type="button" className="cd-stat" aria-pressed={filter === t.key} onClick={() => setFilter(t.key)}>
+                <span className="cd-stat-value">{fmt(t.value)}</span>
+                <span className="cd-stat-label">{t.label}</span>
+                <span className="cd-stat-sub">{t.sub}</span>
+              </button>
+            ))}
           </div>
 
-          <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <h2 style={sectionTitle}>Top Issues</h2>
+          {companyId && (
+            <TriageBar companyId={companyId} period={period} project={project} count={stats.untracked} onDone={refresh} />
+          )}
+
+          <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="cd-toolbar">
+              <h2 className="cd-toolbar-grow" style={{ ...sectionTitle, flexGrow: 1 }}>
+                {tiles.find((t) => t.key === filter)!.label} · {visible.length}
+              </h2>
+              {projects.length > 1 && (
+                <select className="cd-select" value={project} onChange={(e) => setProject(e.target.value)} aria-label="Project">
+                  <option value="all">All projects</option>
+                  {projects.map(([slug, name]) => (
+                    <option key={slug} value={slug}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="cd-seg" role="group" aria-label="Time range">
+                {PERIODS.map((p) => (
+                  <button key={p} type="button" aria-pressed={p === period} onClick={() => setPeriod(p)}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {visible.length === 0 ? (
-              <p style={{ color: c.mutedFg, margin: 0 }}>No unresolved errors in the last {period}. Nice.</p>
+              <div className="cd-card" style={{ padding: "28px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, color: c.mutedFg, textAlign: "center" }}>
+                <CheckIcon size={22} />
+                <span>
+                  {filter === "all"
+                    ? `No unresolved errors in the last ${period}.`
+                    : filter === "untracked"
+                      ? "Every error has a task."
+                      : "Nothing here for this filter."}
+                </span>
+              </div>
             ) : (
-              <div className="cd-table-wrap cd-issues-wrap">
-                <table className="cd-table cd-issues">
-                  <thead>
-                    <tr>
-                      <th scope="col">Issue</th>
-                      <th scope="col">Project</th>
-                      <th scope="col">Events · {period}</th>
-                      <th scope="col" style={{ textAlign: "right" }}>Users</th>
-                      <th scope="col">Paperclip task</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map((issue) => {
-                      const link = links[issue.id];
-                      const canCreate = !link || link.status === "done" || link.status === "cancelled";
-                      return (
-                        <IssueRow
-                          key={issue.id}
-                          issue={issue}
-                          link={link}
-                          formOpen={openForm === issue.id}
-                          action={
-                            canCreate && companyId ? (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-                                {link && <TaskChip task={link} />}
-                                <CreateTaskButton
-                                  companyId={companyId}
-                                  issue={issue}
-                                  label={link ? "New task" : "Create task"}
-                                  target={data.targets?.[issue.id]}
-                                  formOpen={openForm === issue.id}
-                                  onToggleForm={() => setOpenForm(openForm === issue.id ? null : issue.id)}
-                                  onCreated={refresh}
-                                />
-                              </div>
-                            ) : link ? (
-                              <TaskChip task={link} />
-                            ) : null
-                          }
-                          form={
-                            companyId ? (
-                              <CreateTaskForm
-                                companyId={companyId}
-                                issue={issue}
-                                target={data.targets?.[issue.id]}
-                                onCancel={() => setOpenForm(null)}
-                                onDone={() => {
-                                  setOpenForm(null);
-                                  refresh();
-                                }}
-                              />
-                            ) : null
-                          }
-                        />
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="cd-list">
+                <div className="cd-list-head" aria-hidden="true">
+                  <span>Error</span>
+                  <span>Events · {period}</span>
+                  <span style={{ textAlign: "right" }}>Users</span>
+                  <span>Task</span>
+                </div>
+                {visible.map((issue) => {
+                  const link = links[issue.id];
+                  const canCreate = !isOpenTask(link);
+                  const formOpen = openForm === issue.id;
+                  return (
+                    <IssueRow
+                      key={issue.id}
+                      issue={issue}
+                      period={period}
+                      action={
+                        <>
+                          {link && <TaskChip task={link} />}
+                          {canCreate && companyId && (
+                            <CreateTaskButton
+                              companyId={companyId}
+                              issue={issue}
+                              label={link ? "New task" : "Create task"}
+                              target={data.targets?.[issue.id]}
+                              formOpen={formOpen}
+                              onToggleForm={() => setOpenForm(formOpen ? null : issue.id)}
+                              onCreated={refresh}
+                            />
+                          )}
+                        </>
+                      }
+                      form={
+                        formOpen && companyId ? (
+                          <CreateTaskForm
+                            companyId={companyId}
+                            issue={issue}
+                            target={data.targets?.[issue.id]}
+                            onCancel={() => setOpenForm(null)}
+                            onDone={() => {
+                              setOpenForm(null);
+                              refresh();
+                            }}
+                          />
+                        ) : null
+                      }
+                    />
+                  );
+                })}
               </div>
             )}
-            <p style={{ margin: 0, fontSize: 12, color: c.mutedFg }}>
-              Create task opens a Paperclip issue with the error, stack trace and a link back to {data.provider}, assigned to the agent you choose.
+            <p style={{ ...hint, fontSize: 12 }}>
+              A task carries the error, its stack trace and a link back to {data.provider}. Error text reaches agents
+              only as labelled, untrusted data.
             </p>
           </section>
         </>
       )}
     </div>
-  );
-}
-
-function IssueRow({
-  issue,
-  link,
-  action,
-  form,
-  formOpen,
-}: {
-  issue: ErrorIssue;
-  link: LinkedTask | undefined;
-  action: ReactNode;
-  form: ReactNode;
-  formOpen: boolean;
-}) {
-  const hot = issue.isNew || issue.isRegression;
-  return (
-    <>
-      <tr>
-        <td>
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <span style={{ marginTop: 5 }}>
-              <Dot color={LEVEL_COLOR[issue.level]} label={issue.level} />
-            </span>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
-              <a href={issue.url} target="_blank" rel="noopener noreferrer" className="cd-link" style={{ fontFamily: c.mono, overflowWrap: "anywhere" }}>
-                {issue.title}
-              </a>
-              <span style={{ color: c.mutedFg, overflowWrap: "anywhere" }}>
-                {[
-                  issue.culprit,
-                  issue.isRegression ? "regression" : issue.isNew ? `new, first seen ${timeAgo(issue.firstSeen)}` : `first seen ${timeAgo(issue.firstSeen)}`,
-                  issue.shortId,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </div>
-          </div>
-        </td>
-        <td data-label="Project">{issue.project.name}</td>
-        <td data-label="Events">
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
-            <Sparkline values={issue.trend} hot={hot} />
-            <span>{fmt(issue.events)}</span>
-          </div>
-        </td>
-        <td data-label="Users" style={{ textAlign: "right" }}>{fmt(issue.users)}</td>
-        <td data-label="Task">{action ?? (link ? null : <span style={{ color: c.mutedFg }}>—</span>)}</td>
-      </tr>
-      {formOpen && (
-        <tr>
-          <td colSpan={5} style={{ background: c.muted }}>
-            {form}
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-function Banner({ tone, children }: { tone: "error" | "info"; children: ReactNode }) {
-  return (
-    <div
-      role={tone === "error" ? "alert" : "status"}
-      style={{
-        border: `1px solid ${tone === "error" ? c.destructive : c.border}`,
-        color: tone === "error" ? c.destructive : c.fg,
-        padding: "10px 14px",
-        fontSize: 13,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function SetupCard({ message }: { message: string }) {
-  return (
-    <section style={{ border: `1px solid ${c.border}`, background: c.card, padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 720 }}>
-      <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Connect Sentry</h2>
-      <p style={{ margin: 0, color: c.mutedFg }}>{message}</p>
-      <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6, lineHeight: 1.5 }}>
-        <li>In Sentry, open Settings → Developer Settings → Custom Integrations and create an Internal Integration with Issue &amp; Event set to Read.</li>
-        <li>Copy its token and save it in Paperclip under Settings → Secrets.</li>
-        <li>Open Settings → Plugins → Crashdesk, enter your organization slug and pick the secret.</li>
-      </ol>
-    </section>
   );
 }
 
@@ -795,126 +972,133 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
   const issues = data?.configured ? data.snapshot.issues : [];
   const links = data?.configured ? data.links : {};
   const top = issues.slice(0, 3);
+  const untracked = issues.filter((i) => !isOpenTask(links[i.id])).length;
   const numbers = [
-    { label: "unresolved", value: issues.length },
-    { label: "new", value: issues.filter((i) => i.isNew).length },
-    { label: "users affected", value: issues.reduce((sum, i) => sum + i.users, 0) },
+    { label: "Unresolved", value: issues.length, alert: false },
+    { label: "New", value: issues.filter((i) => i.isNew || i.isRegression).length, alert: false },
+    { label: "Without a task", value: untracked, alert: untracked > 0 },
   ];
 
   return (
+    // `contain` keeps long error text from widening the host's dashboard column.
     <div
       className="cd-root"
-      style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px", minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden", contain: "inline-size" }}
+      style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px", width: "100%", maxWidth: "100%", overflow: "hidden", contain: "inline-size" }}
     >
-      <style>{CSS + "@keyframes cd-spin { to { transform: rotate(360deg); } }"}</style>
+      <style>{CSS}</style>
 
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, minWidth: 0 }}>
+      <div className="cd-toolbar" style={{ minWidth: 0 }}>
         <span style={{ color: c.mutedFg, display: "flex" }}>
           <BugIcon size={16} />
         </span>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, flexGrow: 1, minWidth: 0 }}>App Errors</h2>
-        <span style={{ fontSize: 12, color: c.mutedFg }}>
-          {data?.configured ? `Last 24h · ${timeAgo(data.snapshot.fetchedAt)}` : ""}
-        </span>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, flexGrow: 1, minWidth: 0 }}>App errors</h2>
         {data?.configured && (
           <button
             type="button"
             onClick={() => void syncNow()}
             disabled={refreshing}
             aria-label="Refresh errors"
-            style={{ display: "flex", padding: 6, background: "transparent", border: 0, color: c.mutedFg, cursor: "pointer" }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 2px", background: "transparent", border: 0, color: c.mutedFg, cursor: "pointer", fontSize: 12 }}
           >
+            {`24h · ${timeAgo(data.snapshot.fetchedAt)}`}
             <RefreshIcon spinning={refreshing} />
           </button>
         )}
       </div>
 
-      {loading && !data && <p style={{ margin: 0, fontSize: 13, color: c.mutedFg }}>Loading errors…</p>}
-      {error && <p style={{ margin: 0, fontSize: 13, color: c.destructive }}>{error.message}</p>}
+      {loading && !data && <p style={hint}>Loading errors…</p>}
+      {error && <p style={{ ...hint, color: c.destructive }}>{error.message}</p>}
       {refreshError && (
-        <p role="alert" style={{ margin: 0, fontSize: 13, color: c.destructive }}>
+        <p role="alert" style={{ ...hint, color: c.destructive }}>
           {refreshError}
         </p>
       )}
 
-      {data && !data.configured && (
-        <p style={{ margin: 0, fontSize: 13, color: c.mutedFg, lineHeight: 1.5 }}>
-          Connect Sentry to see your app errors here and turn them into tasks.
-        </p>
-      )}
+      {data && !data.configured && <p style={hint}>Connect your error tracker to see app errors here and turn them into tasks.</p>}
 
       {data?.configured && (
         <>
-          {!data.snapshot.ok && (
-            <p style={{ margin: 0, fontSize: 12, color: c.destructive }}>Last sync failed. Showing the last list that loaded.</p>
-          )}
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-            {numbers.map((n) => (
-              <div key={n.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <span style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{fmt(n.value)}</span>
-                <span style={{ fontSize: 12, color: c.mutedFg }}>{n.label}</span>
-              </div>
-            ))}
-          </div>
+          {!data.snapshot.ok && <p style={{ ...hint, fontSize: 12, color: c.destructive }}>Last sync failed. Showing the last list that loaded.</p>}
 
-          {top.length === 0 ? (
-            <p style={{ margin: 0, fontSize: 13, color: c.mutedFg }}>No unresolved errors in the last 24 hours.</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: `1px solid ${c.border}`, paddingTop: 12 }}>
-              <span style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: c.mutedFg }}>Top issues</span>
-              {top.map((issue) => {
-                const link = links[issue.id];
-                return (
-                  <div key={issue.id} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                    <span style={{ marginTop: 5 }}>
-                      <Dot color={LEVEL_COLOR[issue.level]} label={issue.level} />
-                    </span>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flexGrow: 1 }}>
-                      <span
-                        title={issue.title}
-                        style={{
-                          fontFamily: c.mono,
-                          fontSize: 12.5,
-                          overflowWrap: "anywhere",
-                          display: "-webkit-box",
-                          WebkitBoxOrient: "vertical",
-                          WebkitLineClamp: 2,
-                          overflow: "hidden",
-                        }}
-                      >
-                        {issue.title}
-                      </span>
-                      <span style={{ fontSize: 12, color: c.mutedFg, overflowWrap: "anywhere" }}>
-                        {issue.project.name} · {fmt(issue.events)} events · {fmt(issue.users)} users
-                        {link ? ` · ${link.identifier ?? "task"} ${link.status.replace("_", " ")}` : ""}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+          {issues.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: c.mutedFg, fontSize: 13 }}>
+              <span style={{ color: c.green, display: "flex" }}>
+                <CheckIcon size={18} />
+              </span>
+              No unresolved errors in the last 24 hours.
             </div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                {numbers.map((n) => (
+                  <div key={n.label} style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                    <span style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1, color: n.alert ? c.yellow : undefined }}>
+                      {fmt(n.value)}
+                    </span>
+                    <span style={{ fontSize: 12, color: c.mutedFg }}>{n.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: `1px solid ${c.border}`, paddingTop: 12 }}>
+                {top.map((issue) => {
+                  const link = links[issue.id];
+                  return (
+                    <div key={issue.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", minWidth: 0 }}>
+                      <span style={{ marginTop: 5 }}>
+                        <Dot color={LEVEL_COLOR[issue.level]} label={issue.level} />
+                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flexGrow: 1 }}>
+                        <span className="cd-clamp" title={issue.title} style={{ fontFamily: c.mono, fontSize: 12.5 }}>
+                          {issue.title}
+                        </span>
+                        <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px", fontSize: 12, color: c.mutedFg }}>
+                          <span>
+                            {issue.project.name} · {plural(issue.events, "event")} · {plural(issue.users, "user")}
+                          </span>
+                          {link ? (
+                            <span className="cd-badge">
+                              <Dot color={STATUS_COLOR[link.status] ?? c.mutedFg} />
+                              {link.identifier ?? "Task"} · {link.status.replace("_", " ")}
+                            </span>
+                          ) : (
+                            <span className="cd-badge" style={{ color: c.yellow, borderColor: c.yellow }}>
+                              No task
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </>
       )}
 
       <a {...companyLink(PAGE_PATH)} className="cd-link" style={{ fontSize: 13, color: c.mutedFg, alignSelf: "flex-start" }}>
-        {data && !data.configured ? "Set up Crashdesk →" : "Open Crashdesk →"}
+        {data && !data.configured
+          ? "Set up Crashdesk →"
+          : issues.length > top.length
+            ? `See all ${fmt(issues.length)} errors →`
+            : "Open Crashdesk →"}
       </a>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Projects panel on the errors page: map each Sentry project to a Paperclip project
+// Routing panel: who gets errors, and which Paperclip project they belong to
 // ---------------------------------------------------------------------------
 
 interface ProjectMapRow {
   slug: string;
-  /** Platform Sentry reports for the project, e.g. "react-native", "node". */
+  /** Platform the tracker reports for the project, e.g. "react-native", "node". */
   platform: string;
   projectId: string;
   projectSource: "mapping" | "name" | null;
-  /** The row's own assignee; "" means it uses the fallback. */
+  /** The row's own assignee; "" means it uses the default. */
   assignee: string;
 }
 
@@ -931,20 +1115,11 @@ interface MappingDraft {
 }
 
 /**
- * One row per Sentry project, because each Sentry project is one codebase and
- * the agent who fixes it depends on that code (an app, an API...). The
- * fallback assignee covers rows left on "Use fallback", so a team with one
- * kind of code only picks it once.
+ * The default assignee is the only choice a team has to make. The rows below
+ * are for teams where different agents own different code: each tracker
+ * project is one codebase, so it can go to its own Paperclip project and agent.
  */
-function ProjectMappingPanel({
-  companyId,
-  onClose,
-  onSaved,
-}: {
-  companyId: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
+function RoutingPanel({ companyId, onClose, onSaved }: { companyId: string; onClose: () => void; onSaved: () => void }) {
   const { data, loading, error, refresh } = usePluginData<ProjectMapData>("project-map", { companyId });
   const save = usePluginAction("save-project-map");
   const [draft, setDraft] = useState<MappingDraft | null>(null);
@@ -972,7 +1147,7 @@ function ProjectMappingPanel({
       setDraft(null);
       refresh();
       onSaved();
-      setMessage({ tone: "ok", text: "Saved. Create task now files errors this way." });
+      setMessage({ tone: "ok", text: "Saved." });
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
     } finally {
@@ -981,93 +1156,20 @@ function ProjectMappingPanel({
   }
 
   return (
-    <section
-      aria-label="Projects"
-      style={{ border: `1px solid ${c.border}`, background: c.card, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 16 }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2 style={{ ...sectionTitle, flexGrow: 1 }}>Projects</h2>
-          <button type="button" className="cd-btn" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        <p style={{ margin: 0, color: c.mutedFg, lineHeight: 1.5 }}>
-          Each Sentry project is one codebase. For each, pick the Paperclip project its tasks go to and the agent who
-          fixes that code, for example an app engineer for a mobile app and a backend engineer for an API. Projects left
-          on <em>Use fallback</em> go to the fallback assignee.
-        </p>
+    <section className="cd-card" aria-label="Routing" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="cd-toolbar">
+        <h2 style={{ ...sectionTitle, flexGrow: 1 }}>Routing</h2>
+        <button type="button" className="cd-btn" onClick={onClose}>
+          Close
+        </button>
       </div>
 
-      {loading && !data && <p style={{ margin: 0, color: c.mutedFg }}>Loading…</p>}
-      {error && <p style={{ margin: 0, color: c.destructive }}>{error.message}</p>}
-
-      {data && rows.length === 0 && (
-        <p style={{ margin: 0, color: c.mutedFg }}>
-          No Sentry projects yet. A project shows up here once it has an unresolved error in the last 14 days.
-        </p>
-      )}
-
-      {rows.length > 0 && (
-        <div className="cd-table-wrap">
-          <table className="cd-table" style={{ minWidth: 760 }}>
-            <thead>
-              <tr>
-                <th scope="col">Sentry project</th>
-                <th scope="col">Paperclip project</th>
-                <th scope="col">Assignee</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const value = values.rows[row.slug] ?? { projectId: "", assignee: "" };
-                const changed = draft !== null && (value.projectId !== row.projectId || value.assignee !== row.assignee);
-                const status = changed
-                  ? "Not saved"
-                  : row.projectSource === "mapping"
-                    ? "Saved"
-                    : row.projectSource === "name"
-                      ? "Suggested by name"
-                      : "Not mapped";
-                return (
-                  <tr key={row.slug}>
-                    <td style={{ verticalAlign: "middle" }}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <span style={{ fontFamily: c.mono }}>{row.slug}</span>
-                        {row.platform && <span style={{ fontSize: 12, color: c.mutedFg }}>{row.platform}</span>}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      <ProjectPicker
-                        companyId={companyId}
-                        value={value.projectId}
-                        onChange={(projectId) => editRow(row.slug, { projectId })}
-                        placeholder="No project"
-                        noneLabel="No project"
-                      />
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      <AssigneePicker
-                        companyId={companyId}
-                        value={value.assignee}
-                        onChange={(assignee) => editRow(row.slug, { assignee })}
-                        placeholder="Use fallback"
-                        noneLabel="Use fallback"
-                      />
-                    </td>
-                    <td style={{ verticalAlign: "middle", color: status === "Saved" ? c.fg : c.mutedFg }}>{status}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {loading && !data && <p style={hint}>Loading…</p>}
+      {error && <p style={{ ...hint, color: c.destructive }}>{error.message}</p>}
 
       {data && (
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: c.mutedFg, maxWidth: 360 }}>
-          Fallback assignee
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 380 }}>
+          <span style={{ fontWeight: 600 }}>Default assignee</span>
           <AssigneePicker
             companyId={companyId}
             value={values.fallbackAssignee}
@@ -1075,12 +1177,62 @@ function ProjectMappingPanel({
             placeholder="Nobody"
             noneLabel="Nobody"
           />
-          <span style={{ fontSize: 12 }}>For projects without their own assignee, including new ones.</span>
+          <span style={{ ...hint, fontSize: 12 }}>Gets every error task, unless a project below has its own assignee.</span>
         </label>
       )}
 
       {data && (
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontWeight: 600 }}>Projects</span>
+          <p style={{ ...hint, fontSize: 12, marginTop: 4, marginBottom: 10 }}>
+            Optional. Send a project's errors to a Paperclip project and to the agent who owns that code. A project
+            with the same name is suggested; save to confirm it.
+          </p>
+          {rows.length === 0 && <p style={hint}>No projects yet. A project shows up here once it has an unresolved error.</p>}
+          {rows.map((row) => {
+            const value = values.rows[row.slug] ?? { projectId: "", assignee: "" };
+            const changed = draft !== null && (value.projectId !== row.projectId || value.assignee !== row.assignee);
+            const status = changed
+              ? "Not saved"
+              : row.projectSource === "mapping"
+                ? "Saved"
+                : row.projectSource === "name"
+                  ? "Suggested, not saved"
+                  : "Not set";
+            return (
+              <div key={row.slug} className="cd-map-row">
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                  <span style={{ fontFamily: c.mono, overflowWrap: "anywhere" }}>{row.slug}</span>
+                  <span style={{ fontSize: 12, color: c.mutedFg }}>{[row.platform, status].filter(Boolean).join(" · ")}</span>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="cd-map-label">Paperclip project</div>
+                  <ProjectPicker
+                    companyId={companyId}
+                    value={value.projectId}
+                    onChange={(projectId) => editRow(row.slug, { projectId })}
+                    placeholder="No project"
+                    noneLabel="No project"
+                  />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="cd-map-label">Assignee</div>
+                  <AssigneePicker
+                    companyId={companyId}
+                    value={value.assignee}
+                    onChange={(assignee) => editRow(row.slug, { assignee })}
+                    placeholder="Default assignee"
+                    noneLabel="Default assignee"
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {data && (
+        <div className="cd-toolbar" style={{ gap: 12 }}>
           <button type="button" className="cd-btn cd-btn-primary" onClick={() => void onSave()} disabled={busy || !unsaved}>
             {busy ? "Saving…" : "Save"}
           </button>

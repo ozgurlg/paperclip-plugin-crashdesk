@@ -21,6 +21,7 @@
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",
+    "preview": "node ./scripts/preview.mjs",
     "dev": "node ./scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",

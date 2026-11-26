@@ -24,6 +24,7 @@ export const JOB_KEYS = {
 export const TOOL_NAMES = {
   listErrors: "list-errors",
   getError: "get-error",
+  createErrorTask: "create-error-task",
 } as const;
 
 export const DATA_KEYS = {
@@ -35,6 +36,8 @@ export const ACTION_KEYS = {
   refresh: "refresh",
   createTask: "create-task",
   saveProjectMap: "save-project-map",
+  saveDefaultAssignee: "save-default-assignee",
+  triage: "triage",
 } as const;
 
 export const PERIODS = ["24h", "7d", "14d"] as const;

@@ -17,7 +17,7 @@ const manifest: PaperclipPluginManifestV1 = {
   version: PLUGIN_VERSION,
   displayName: "Crashdesk",
   description:
-    "Error tracking for Paperclip. See your most frequent Sentry errors and hand any of them to an agent as a Paperclip task, with the stack trace attached.",
+    "Error tracking for Paperclip. See your most frequent app errors from Sentry, hand any of them to an agent as a Paperclip task with the stack trace attached, or let an agent triage the whole list.",
   author: "ozgurlg",
   categories: ["ui", "automation"],
   capabilities: [
@@ -105,6 +105,26 @@ const manifest: PaperclipPluginManifestV1 = {
         type: "object",
         properties: { id: { type: "string", description: "Error id from list-errors." } },
         required: ["id"],
+      },
+    },
+    {
+      name: TOOL_NAMES.createErrorTask,
+      displayName: "Create a fix task for app errors",
+      description:
+        "Creates one Paperclip fix task for one error, or for several errors that share a root cause, and links them to it. The task goes to the project and assignee set in Crashdesk's routing.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          ids: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: 10,
+            description: "Error ids from list-errors. The first one is the main error; the rest share its root cause.",
+          },
+          parentTaskId: { type: "string", description: "Id of the triage task this fix belongs to, if any." },
+        },
+        required: ["ids"],
       },
     },
   ],

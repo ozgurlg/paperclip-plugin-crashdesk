@@ -20,11 +20,12 @@ Sentry is already great at showing errors. What it cannot do is say "Software En
 
 ## Features
 
-- **Dashboard widget.** The day's headline numbers and the three most frequent errors, right on the Paperclip dashboard.
-- **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project.
-- **Create task.** Turn an error into a Paperclip task. With a project and default assignee mapped, it is one click (priority follows the error level); **⋯** opens Paperclip's own pickers for a one-off change. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
+- **Dashboard widget.** How many errors are unresolved, new and without a task, plus the three most frequent ones with their task status, right on the Paperclip dashboard.
+- **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project, or by what still needs a task. Works on a phone.
+- **Triage with an agent.** One click hands every error without a task to an agent. It groups them by root cause, opens a fix task for each cause worth fixing and skips the noise, so nobody sorts fifty errors by hand.
+- **Create task.** Turn an error into a Paperclip task. With a default assignee chosen, it is one click (priority follows the error level); **⋯** opens Paperclip's own pickers for a one-off change. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
 - **No duplicates.** Each task is linked to its error, so the same error never becomes two open tasks, and the table shows every linked task's live status.
-- **Agent tools.** Agents can call `list-errors` and `get-error` to check on errors themselves.
+- **Agent tools.** Agents can call `list-errors` and `get-error` to check on errors themselves, and `create-error-task` to open a fix task for one error or a group with the same root cause.
 - **Native look.** Built on Paperclip's own theme tokens and components. Follows light and dark mode.
 - **Read-only.** Needs one scope, `event:read`. Crashdesk never changes anything in Sentry.
 
@@ -95,7 +96,8 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 
 Settings are per company, so each Paperclip company can connect its own Sentry organization. One token covers every project in the organization: Crashdesk shows them all and the errors page filters by project.
 
-4. **Map projects.** On the errors page, press **Projects**. Each Sentry project is one codebase and gets a row: pick the Paperclip project its tasks go to and the agent who fixes that code (say, an app engineer for a mobile app and a backend engineer for an API). Rows left on *Use fallback* go to the **fallback assignee**, which also catches new Sentry projects. A Paperclip project with the same name is suggested until you save. Sentry and Paperclip know nothing about each other, so this is the one place that links them.
+4. **Choose who gets errors.** The errors page asks for one thing first: the **default assignee**, the agent that tasks from errors go to. A team with one engineer picks that agent; a larger team can pick its lead. That is all the setup most teams need.
+5. **Route projects (optional).** If different agents own different code, press **Routing** on the errors page. Each Sentry project gets a row: pick the Paperclip project its tasks go to and the agent who fixes that code (say, an app engineer for a mobile app and a backend engineer for an API). Rows left on *Default assignee* go to the default assignee, which also catches new Sentry projects. A Paperclip project with the same name is suggested until you save.
 
 The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (or `/<company-prefix>/crashdesk`) opens the full errors page. The first sync runs right away.
 
@@ -107,6 +109,7 @@ The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (o
 |---|---|---|
 | `list-errors` | `period`: `24h` (default), `7d` or `14d` | The most frequent unresolved errors with counts, flags and any linked task. |
 | `get-error` | `id`: an error id from `list-errors` | One error with its exception, release, device and stack, as an untrusted-data block. |
+| `create-error-task` | `ids`: 1 to 10 error ids; `parentTaskId` (optional) | Creates one fix task for the error, or for several errors that share a root cause, routed like **Create task**. |
 
 ## Security
 
@@ -139,11 +142,14 @@ The code is small on purpose:
 
 | File | What it does |
 |---|---|
-| `src/providers/types.ts` | Provider-neutral error shapes. New trackers plug in here. |
+| `src/providers/types.ts` | Provider-neutral error shapes. Everything outside `providers/` only sees these. |
+| `src/providers/index.ts` | The list of trackers. A new one is a file next to `sentry.ts` plus a line here. |
 | `src/providers/sentry.ts` | Sentry API calls and parsing. |
 | `src/task.ts` | Builds the Paperclip task and sanitizes error text. |
 | `src/worker.ts` | Sync job, data, actions and agent tools. |
 | `src/ui/index.tsx` | The errors page, dashboard widget and sidebar entry. |
+
+`npm run preview` serves the errors page and the widget with example data, without a running Paperclip (`?widget`, `?fresh` and `?empty` show the other states).
 
 Contributions are welcome. Please open an issue before a large change.
 

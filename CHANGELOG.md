@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Triage with an agent: one task per tracker project that asks an agent to group the errors without a task by root cause and open fix tasks for the ones worth fixing.
+- Agent tool `create-error-task`, which opens one fix task for an error or for several errors with the same root cause and links all of them to it.
+- First-run question on the errors page: who gets errors (the default assignee).
+- `npm run preview`: the UI with example data, without a running Paperclip.
+
+### Changed
+
+- Errors page and dashboard widget redesigned to work on phones: the headline numbers filter the list, and each error is a card on narrow screens.
+- The Projects panel is now Routing, with the default assignee (was: fallback assignee) first. Create task is one click as soon as an assignee is known.
+- Providers are created through `src/providers/index.ts`, so the worker no longer names Sentry.
+
 ## [0.1.0]
 
 ### Added

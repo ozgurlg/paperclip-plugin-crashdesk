@@ -57,9 +57,19 @@ const PAGE_PATH = "/crashdesk";
 
 /** Paperclip project of an error: from the saved mapping, or only suggested by a matching name. */
 interface ProjectMatch {
+  /** "" when the mapping sets no project. */
   id: string;
   name: string;
-  source: "mapping" | "name";
+  source: "mapping" | "name" | null;
+  /** Default assignee from the mapping, in the picker encoding ("agent:<id>", "user:<id>" or ""). */
+  assignee: string;
+}
+
+/** "agent:<id>" / "user:<id>" → the ids the create action takes. */
+function splitAssignee(value: string): { agent: string | null; user: string | null } {
+  const [kind, id] = value.split(":");
+  if (!id) return { agent: null, user: null };
+  return kind === "agent" ? { agent: id, user: null } : kind === "user" ? { agent: null, user: id } : { agent: null, user: null };
 }
 
 /**
@@ -284,10 +294,11 @@ function CreateTaskForm({
   onCancel: () => void;
 }) {
   const createTask = usePluginAction("create-task");
-  const [assignee, setAssignee] = useState("");
-  const [assigneeIds, setAssigneeIds] = useState<{ agent: string | null; user: string | null }>({ agent: null, user: null });
+  // Start with the default assignee saved for this project in the mapping.
+  const [assignee, setAssignee] = useState(matchedProject?.assignee ?? "");
+  const [assigneeIds, setAssigneeIds] = useState(splitAssignee(matchedProject?.assignee ?? ""));
   // Start with the Paperclip project that has the same name as the Sentry project.
-  const [projectId, setProjectId] = useState(matchedProject?.id ?? "");
+  const [projectId, setProjectId] = useState(matchedProject?.source ? matchedProject.id : "");
   const [priority, setPriority] = useState(issue.level === "fatal" ? "critical" : issue.level === "error" ? "high" : "medium");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -325,11 +336,14 @@ function CreateTaskForm({
             setAssigneeIds({ agent: selection.assigneeAgentId, user: selection.assigneeUserId });
           }}
         />
+        {matchedProject?.assignee && assignee === matchedProject.assignee && (
+          <span style={{ fontSize: 11 }}>Default for {issue.project.slug}, from your project mapping</span>
+        )}
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: c.mutedFg, minWidth: 200 }}>
         Project
         <ProjectPicker companyId={companyId} value={projectId} onChange={setProjectId} placeholder="No project" noneLabel="No project" />
-        {matchedProject && projectId === matchedProject.id && (
+        {matchedProject?.source && matchedProject.id && projectId === matchedProject.id && (
           <span style={{ fontSize: 11 }}>
             {matchedProject.source === "mapping"
               ? `From your project mapping for ${issue.project.slug}`
@@ -793,7 +807,7 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
 
 interface ProjectMapData {
   companyId: string | null;
-  rows: { slug: string; projectId: string; source: "mapping" | "name" | null }[];
+  rows: { slug: string; projectId: string; source: "mapping" | "name" | null; assignee: string }[];
   paperclipProjects: { id: string; name: string }[];
 }
 
@@ -808,13 +822,15 @@ function ProjectMappingPanel({
 }) {
   const { data, loading, error, refresh } = usePluginData<ProjectMapData>("project-map", { companyId });
   const save = usePluginAction("save-project-map");
-  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const [draft, setDraft] = useState<Record<string, { projectId: string; assignee: string }> | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
   const rows = data?.rows ?? [];
   // The draft starts from what is saved or suggested; editing changes only the draft.
-  const values = draft ?? Object.fromEntries(rows.map((r) => [r.slug, r.projectId]));
+  const values = draft ?? Object.fromEntries(rows.map((r) => [r.slug, { projectId: r.projectId, assignee: r.assignee }]));
+  const edit = (slug: string, patch: Partial<{ projectId: string; assignee: string }>) =>
+    setDraft({ ...values, [slug]: { projectId: "", assignee: "", ...values[slug], ...patch } });
   const unsaved = rows.some((r) => r.source !== "mapping") || draft !== null;
 
   async function onSave() {
@@ -826,7 +842,7 @@ function ProjectMappingPanel({
       setDraft(null);
       refresh();
       onSaved();
-      setMessage({ tone: "ok", text: "Saved. Create task now uses these projects." });
+      setMessage({ tone: "ok", text: "Saved. Create task now starts with these projects and assignees." });
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
     } finally {
@@ -848,7 +864,8 @@ function ProjectMappingPanel({
         </div>
         <p style={{ margin: 0, color: c.mutedFg, lineHeight: 1.5 }}>
           Sentry knows which app each error comes from. Tell Crashdesk which Paperclip project that app belongs to, and
-          Create task will put the task there. A project with the same name is suggested until you save.
+          Create task will put the task there, assigned to the default you pick. A project with the same name is
+          suggested until you save; every task can still be changed before it is created.
         </p>
       </div>
 
@@ -863,18 +880,19 @@ function ProjectMappingPanel({
 
       {rows.length > 0 && companyId && (
         <div className="cd-table-wrap">
-          <table className="cd-table" style={{ minWidth: 560 }}>
+          <table className="cd-table" style={{ minWidth: 720 }}>
             <thead>
               <tr>
                 <th scope="col">Sentry project</th>
                 <th scope="col">Paperclip project</th>
+                <th scope="col">Default assignee</th>
                 <th scope="col">Status</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
-                const value = values[row.slug] ?? "";
-                const changed = draft !== null && value !== row.projectId;
+                const value = values[row.slug] ?? { projectId: "", assignee: "" };
+                const changed = draft !== null && (value.projectId !== row.projectId || value.assignee !== row.assignee);
                 const status = changed
                   ? "Not saved"
                   : row.source === "mapping"
@@ -888,10 +906,19 @@ function ProjectMappingPanel({
                     <td style={{ minWidth: 240 }}>
                       <ProjectPicker
                         companyId={companyId}
-                        value={value}
-                        onChange={(projectId) => setDraft({ ...values, [row.slug]: projectId })}
+                        value={value.projectId}
+                        onChange={(projectId) => edit(row.slug, { projectId })}
                         placeholder="No project"
                         noneLabel="No project"
+                      />
+                    </td>
+                    <td style={{ minWidth: 220 }}>
+                      <AssigneePicker
+                        companyId={companyId}
+                        value={value.assignee}
+                        onChange={(assignee) => edit(row.slug, { assignee })}
+                        placeholder="Choose an agent"
+                        noneLabel="No default"
                       />
                     </td>
                     <td style={{ verticalAlign: "middle", color: status === "Saved" ? c.fg : c.mutedFg }}>{status}</td>

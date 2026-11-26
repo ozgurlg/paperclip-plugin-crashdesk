@@ -12,7 +12,14 @@ import { ACTION_KEYS, DATA_KEYS, DEFAULTS, JOB_KEYS, ORIGIN_KIND, PERIODS, TOOL_
 import { createSentryProvider } from "./providers/sentry.ts";
 import { ProviderError, type ErrorIssue, type ErrorProvider } from "./providers/types.ts";
 import { buildTaskDescription, buildTaskTitle, originIdFor, sanitize } from "./task.ts";
-import { cleanProjectMap, resolveProject, type NamedProject, type ProjectMap } from "./match.ts";
+import {
+  assigneeIds,
+  cleanProjectMap,
+  readProjectMapValue,
+  resolveProject,
+  type NamedProject,
+  type ProjectMap,
+} from "./match.ts";
 
 // Paperclip keeps plugin settings per company, so everything here is scoped
 // to a company: its settings, its cached error lists and its tasks. Calls from
@@ -231,7 +238,7 @@ const projectMapKey = (companyId: string) => ({
 async function readProjectMap(ctx: PluginContext, companyId: string): Promise<ProjectMap> {
   const raw = await ctx.state.get(projectMapKey(companyId));
   // Entries are validated on save; reading again keeps old junk out.
-  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as ProjectMap) : {};
+  return readProjectMapValue(raw);
 }
 
 /** Sentry projects seen in any cached error list, so they can be mapped. */
@@ -278,8 +285,8 @@ const plugin: PaperclipPlugin = definePlugin({
         // from the saved mapping or only from a matching name.
         projectMatches: Object.fromEntries(
           result.issues.flatMap((issue) => {
-            const { project, source } = resolveProject(issue.project, map, projects);
-            return project && source ? [[issue.id, { ...project, source }]] : [];
+            const { project, source, assignee } = resolveProject(issue.project, map, projects);
+            return project || assignee ? [[issue.id, { id: project?.id ?? "", name: project?.name ?? "", source, assignee }]] : [];
           }),
         ),
       };
@@ -299,8 +306,8 @@ const plugin: PaperclipPlugin = definePlugin({
       const rows = [...slugs.values()]
         .sort((a, b) => a.slug.localeCompare(b.slug))
         .map((p) => {
-          const { project, source } = resolveProject(p, map, projects);
-          return { slug: p.slug, projectId: project?.id ?? "", source };
+          const { project, source, assignee } = resolveProject(p, map, projects);
+          return { slug: p.slug, projectId: project?.id ?? "", source, assignee };
         });
       return { companyId, rows, paperclipProjects: projects };
     });
@@ -352,14 +359,19 @@ const plugin: PaperclipPlugin = definePlugin({
           : detail.issue.level === "error"
             ? "high"
             : "medium";
-      const assigneeAgentId = asCompanyId(params.assigneeAgentId) ?? undefined;
-      const assigneeUserId = asCompanyId(params.assigneeUserId) ?? undefined;
-      // An explicit choice (even "no project", sent as "") wins; callers that
-      // send nothing get the mapped project (or the one with the same name).
+      // An explicit choice (even "none", sent as "") wins; callers that send
+      // nothing get the project and default assignee from the mapping.
+      const mapped = resolveProject(
+        detail.issue.project,
+        await readProjectMap(ctx, companyId),
+        await paperclipProjects(ctx, companyId),
+      );
       const projectId =
-        params.projectId === undefined
-          ? (resolveProject(detail.issue.project, await readProjectMap(ctx, companyId), await paperclipProjects(ctx, companyId)).project?.id ?? undefined)
-          : (asCompanyId(params.projectId) ?? undefined);
+        params.projectId === undefined ? (mapped.project?.id ?? undefined) : (asCompanyId(params.projectId) ?? undefined);
+      const fromMapping = assigneeIds(mapped.assignee);
+      const explicitAssignee = params.assigneeAgentId !== undefined || params.assigneeUserId !== undefined;
+      const assigneeAgentId = explicitAssignee ? (asCompanyId(params.assigneeAgentId) ?? undefined) : fromMapping.assigneeAgentId;
+      const assigneeUserId = explicitAssignee ? (asCompanyId(params.assigneeUserId) ?? undefined) : fromMapping.assigneeUserId;
 
       const task = await ctx.issues.create({
         companyId,

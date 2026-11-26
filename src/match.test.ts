@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanProjectMap, matchProject, normalizeName, resolveProject } from "./match.ts";
+import {
+  assigneeIds,
+  cleanProjectMap,
+  matchProject,
+  normalizeName,
+  readProjectMapValue,
+  resolveProject,
+} from "./match.ts";
 
 const projects = [
   { id: "p1", name: "Shop App" },
@@ -8,6 +15,7 @@ const projects = [
   { id: "p3", name: "Company" },
 ];
 const shop = { slug: "shop-app", name: "shop-app" };
+const entry = (projectId: string, assignee = "") => ({ projectId, assignee });
 
 test("normalizeName ignores case and separators", () => {
   assert.equal(normalizeName("Shop App"), "shopapp");
@@ -22,31 +30,67 @@ test("name suggestion: same name only, never ambiguous", () => {
   assert.equal(matchProject({ slug: "", name: "" }, [{ id: "x", name: "" }]), null);
 });
 
-test("a saved mapping wins over the name", () => {
-  assert.deepEqual(resolveProject(shop, { "shop-app": "p3" }, projects), {
+test("a saved mapping wins over the name and carries its assignee", () => {
+  assert.deepEqual(resolveProject(shop, { "shop-app": entry("p3", "agent:a1") }, projects), {
     project: { id: "p3", name: "Company" },
     source: "mapping",
+    assignee: "agent:a1",
   });
 });
 
 test("a saved 'no project' is respected", () => {
-  assert.deepEqual(resolveProject(shop, { "shop-app": "" }, projects), { project: null, source: "mapping" });
+  assert.deepEqual(resolveProject(shop, { "shop-app": entry("") }, projects), {
+    project: null,
+    source: "mapping",
+    assignee: "",
+  });
 });
 
 test("unmapped projects fall back to the name suggestion", () => {
-  assert.deepEqual(resolveProject(shop, {}, projects), { project: { id: "p1", name: "Shop App" }, source: "name" });
-  assert.deepEqual(resolveProject({ slug: "android", name: "android" }, {}, projects), { project: null, source: null });
+  assert.deepEqual(resolveProject(shop, {}, projects), {
+    project: { id: "p1", name: "Shop App" },
+    source: "name",
+    assignee: "",
+  });
+  assert.equal(resolveProject({ slug: "android", name: "android" }, {}, projects).source, null);
 });
 
-test("a mapping to a deleted project falls back to the name", () => {
-  assert.equal(resolveProject(shop, { "shop-app": "gone" }, projects).source, "name");
+test("a mapping to a deleted project falls back to the name but keeps the assignee", () => {
+  const resolved = resolveProject(shop, { "shop-app": entry("gone", "agent:a1") }, projects);
+  assert.equal(resolved.source, "name");
+  assert.equal(resolved.assignee, "agent:a1");
 });
 
-test("cleanProjectMap drops bad slugs and unknown projects", () => {
+test("cleanProjectMap drops bad slugs, unknown projects and malformed assignees", () => {
   assert.deepEqual(
-    cleanProjectMap({ "shop-app": "p1", blog: "", "bad slug": "p2", android: "nope", x: 3 }, projects),
-    { "shop-app": "p1", blog: "" },
+    cleanProjectMap(
+      {
+        "shop-app": entry("p1", "agent:a1"),
+        blog: entry("", "user:u1"),
+        company: { projectId: "p3", assignee: "agent:x; drop table" },
+        "bad slug": entry("p2"),
+        android: entry("nope"),
+        x: 3,
+      },
+      projects,
+    ),
+    { "shop-app": entry("p1", "agent:a1"), blog: entry("", "user:u1"), company: entry("p3", "") },
   );
   assert.deepEqual(cleanProjectMap(["p1"], projects), {});
   assert.deepEqual(cleanProjectMap(null, projects), {});
+});
+
+test("older maps that stored only a project id still read", () => {
+  assert.deepEqual(readProjectMapValue({ "shop-app": "p1", blog: "" }), {
+    "shop-app": entry("p1"),
+    blog: entry(""),
+  });
+  assert.deepEqual(cleanProjectMap({ "shop-app": "p1" }, projects), { "shop-app": entry("p1") });
+});
+
+test("assigneeIds splits the picker encoding", () => {
+  assert.deepEqual(assigneeIds("agent:a1"), { assigneeAgentId: "a1" });
+  assert.deepEqual(assigneeIds("user:u1"), { assigneeUserId: "u1" });
+  assert.deepEqual(assigneeIds(""), {});
+  assert.deepEqual(assigneeIds("robot:x"), {});
 });

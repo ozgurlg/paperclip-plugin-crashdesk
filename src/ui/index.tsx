@@ -382,14 +382,19 @@ export function CrashdeskPage({ context }: PluginPageProps) {
   const visible = project === "all" ? issues : issues.filter((i) => i.project.slug === project);
 
   const stats = useMemo(() => {
-    const linked = visible.map((i) => links[i.id]).filter((l): l is LinkedTask => Boolean(l));
+    // A cancelled task no longer covers its error, so it is not counted as linked.
+    const linked = visible
+      .map((i) => links[i.id])
+      .filter((l): l is LinkedTask => Boolean(l) && l!.status !== "cancelled");
+    const done = linked.filter((l) => l.status === "done").length;
     return {
       unresolved: visible.length,
       fresh: visible.filter((i) => i.isNew).length,
       regressions: visible.filter((i) => i.isRegression).length,
       users: visible.reduce((sum, i) => sum + i.users, 0),
       linked: linked.length,
-      done: linked.filter((l) => l.status === "done").length,
+      open: linked.length - done,
+      done,
     };
   }, [visible, links]);
 
@@ -456,7 +461,7 @@ export function CrashdeskPage({ context }: PluginPageProps) {
             <Tile
               value={fmt(stats.linked)}
               label="Linked to Tasks"
-              sub={`${stats.linked - stats.done} open, ${stats.done} done`}
+              sub={`${stats.open} open, ${stats.done} done`}
               icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m9 12 2 2 4-4" /></svg>}
             />
           </div>

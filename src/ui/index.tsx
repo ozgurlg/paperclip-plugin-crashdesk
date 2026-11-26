@@ -172,6 +172,20 @@ const CSS = `
 .cd-link:hover { text-decoration: underline; }
 .cd-nav { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: ${c.radius}; color: inherit; text-decoration: none; font-size: 14px; }
 .cd-nav:hover { background: var(--sidebar-accent, ${c.muted}); }
+@media (max-width: 768px) {
+  .cd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; }
+  .cd-tile-value { font-size: 28px !important; }
+  .cd-issues-wrap { border: 0; overflow: visible; }
+  .cd-issues { min-width: 0 !important; display: block; }
+  .cd-issues thead { display: none; }
+  .cd-issues tbody { display: flex; flex-direction: column; gap: 12px; }
+  .cd-issues tr { display: block; border: 1px solid ${c.border}; }
+  .cd-issues td { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 0; padding: 8px 14px; text-align: left !important; }
+  .cd-issues td:first-child { display: block; padding-top: 12px; }
+  .cd-issues td[data-label]::before { content: attr(data-label); color: ${c.mutedFg}; font-size: 12px; flex-shrink: 0; }
+  .cd-issues td:last-child { padding-bottom: 12px; }
+  .cd-issues td[colspan] { display: block; }
+}
 `;
 
 // ---------------------------------------------------------------------------
@@ -244,9 +258,9 @@ function Sparkline({ values, hot }: { values: number[]; hot: boolean }) {
 
 function Tile({ value, label, sub, icon }: { value: string; label: string; sub: string; icon: ReactNode }) {
   return (
-    <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ padding: "16px clamp(8px, 2vw, 20px)", display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <span style={{ fontSize: 34, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{value}</span>
+        <span className="cd-tile-value" style={{ fontSize: 34, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{value}</span>
         <span style={{ color: c.mutedFg }}>{icon}</span>
       </div>
       <span style={{ fontSize: 15 }}>{label}</span>
@@ -510,7 +524,7 @@ export function CrashdeskPage({ context }: PluginPageProps) {
   }, [visible, links]);
 
   return (
-    <div className="cd-root" style={{ padding: "24px clamp(16px, 3vw, 32px) 40px", maxWidth: 1200, display: "flex", flexDirection: "column", gap: 24 }}>
+    <div className="cd-root" style={{ padding: "24px clamp(16px, 3vw, 32px) 40px", maxWidth: 1200, minWidth: 0, display: "flex", flexDirection: "column", gap: 24 }}>
       <style>{CSS + "@keyframes cd-spin { to { transform: rotate(360deg); } }"}</style>
 
       <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, borderBottom: `1px solid ${c.border}`, paddingBottom: 16 }}>
@@ -591,8 +605,8 @@ export function CrashdeskPage({ context }: PluginPageProps) {
             {visible.length === 0 ? (
               <p style={{ color: c.mutedFg, margin: 0 }}>No unresolved errors in the last {period}. Nice.</p>
             ) : (
-              <div className="cd-table-wrap">
-                <table className="cd-table">
+              <div className="cd-table-wrap cd-issues-wrap">
+                <table className="cd-table cd-issues">
                   <thead>
                     <tr>
                       <th scope="col">Issue</th>
@@ -699,15 +713,15 @@ function IssueRow({
             </div>
           </div>
         </td>
-        <td>{issue.project.name}</td>
-        <td>
+        <td data-label="Project">{issue.project.name}</td>
+        <td data-label="Events">
           <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
             <Sparkline values={issue.trend} hot={hot} />
             <span>{fmt(issue.events)}</span>
           </div>
         </td>
-        <td style={{ textAlign: "right" }}>{fmt(issue.users)}</td>
-        <td>{action ?? (link ? null : <span style={{ color: c.mutedFg }}>—</span>)}</td>
+        <td data-label="Users" style={{ textAlign: "right" }}>{fmt(issue.users)}</td>
+        <td data-label="Task">{action ?? (link ? null : <span style={{ color: c.mutedFg }}>—</span>)}</td>
       </tr>
       {formOpen && (
         <tr>

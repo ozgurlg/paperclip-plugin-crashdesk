@@ -790,7 +790,7 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
   return (
     <div
       className="cd-root"
-      style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px", minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden" }}
+      style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px", minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden", contain: "inline-size" }}
     >
       <style>{CSS + "@keyframes cd-spin { to { transform: rotate(360deg); } }"}</style>
 
@@ -858,7 +858,15 @@ export function CrashdeskDashboardWidget({ context }: PluginWidgetProps) {
                     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flexGrow: 1 }}>
                       <span
                         title={issue.title}
-                        style={{ fontFamily: c.mono, fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                        style={{
+                          fontFamily: c.mono,
+                          fontSize: 12.5,
+                          overflowWrap: "anywhere",
+                          display: "-webkit-box",
+                          WebkitBoxOrient: "vertical",
+                          WebkitLineClamp: 2,
+                          overflow: "hidden",
+                        }}
                       >
                         {issue.title}
                       </span>

@@ -75,6 +75,12 @@ export interface ErrorProvider {
    * Absent on trackers that cannot be written to.
    */
   resolveIssue?(issueId: string): Promise<void>;
+  /**
+   * Makes one real read with the configured connection and throws a
+   * ProviderError when it fails. `canResolve` says whether the token may
+   * resolve issues, or null when the tracker does not tell.
+   */
+  checkConnection?(): Promise<{ canResolve: boolean | null }>;
 }
 
 /** An error whose message is safe to show to the operator as-is. */

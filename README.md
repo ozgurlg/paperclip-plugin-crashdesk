@@ -96,6 +96,8 @@ To update later: `git pull && npm install && npm run build`, then disable and re
 | Refresh interval | no | Minutes between background syncs. Default 10, at least 5. **Refresh** on the page syncs right away. |
 | Resolve fixed errors in Sentry | no | Off by default. When on, an error is marked resolved in the next release once its task is done. The token then needs Issue & Event: **Read & Write**. |
 
+After saving, **Test Configuration** makes a real call to Sentry: it tells you when the organization, the URL or the token is wrong, and when *Resolve fixed errors* is on but the token may not resolve errors. (Paperclip lets a plugin read a secret only once the settings are saved, so save first.)
+
 Settings are per company, so each Paperclip company can connect its own Sentry organization. One token covers every project in the organization: Crashdesk shows them all and the errors page filters by project.
 
 4. **Choose who gets errors.** The errors page asks for one thing first: the **default assignee**, the agent that tasks from errors go to. A team with one engineer picks that agent; a larger team can pick its lead. That is all the setup most teams need.

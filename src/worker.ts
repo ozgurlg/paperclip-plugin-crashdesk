@@ -75,6 +75,9 @@ type Priority = (typeof PRIORITIES)[number];
 type Setup = { provider: ErrorProvider; config: CrashdeskConfig } | { problem: SetupProblem };
 
 // Last outcome per company, for the health panel.
+/** The host context, kept so the settings test can reach Sentry outside a job or a page request. */
+let host: PluginContext | null = null;
+
 const health = new Map<string, { problem: SetupProblem | null; syncError: string | null }>();
 
 // ---------------------------------------------------------------------------
@@ -423,6 +426,7 @@ function toLinked(task: { id: string; status: string; title: string }): LinkedTa
 
 const plugin: PaperclipPlugin = definePlugin({
   async setup(ctx) {
+    host = ctx;
     ctx.data.register(DATA_KEYS.overview, async (params) => {
       const companyId = asCompanyId(params.companyId);
       if (!companyId) return { configured: false, setupMessage: SETUP_MESSAGES["no-company"] };
@@ -866,7 +870,54 @@ const plugin: PaperclipPlugin = definePlugin({
     } catch {
       errors.push("Sentry URL is not a valid URL.");
     }
-    return errors.length > 0 ? { ok: false, errors } : { ok: true };
+    if (config.authToken === null || (typeof config.authToken === "string" && !config.authToken.trim())) {
+      errors.push(SETUP_MESSAGES["missing-token"]);
+    }
+    if (errors.length > 0 || !host) return errors.length > 0 ? { ok: false, errors } : { ok: true };
+
+    // The fields are fine: now make a real call. The host does not say which
+    // company is being tested and only hands out a secret once the settings
+    // that use it are saved, so look for the company that has this token bound.
+    let token: string | null = null;
+    for (const company of await host.companies.list({ limit: 200 })) {
+      const resolved = await resolveToken(host, company.id, config.authToken);
+      if ("token" in resolved) {
+        token = resolved.token;
+        break;
+      }
+    }
+    if (token === null) {
+      return {
+        ok: true,
+        warnings: ["The fields look right, but the connection was not tested: Paperclip lets a plugin read a secret only after the settings are saved. Save, then press Test again."],
+      };
+    }
+    const ctx = host;
+    const provider = createProvider(DEFAULT_PROVIDER, {
+      baseUrl: config.sentryUrl,
+      organization: config.organization,
+      token,
+      fetch: (url, init) => ctx.http.fetch(url, init),
+    });
+    if (!provider.checkConnection) return { ok: true };
+    try {
+      const { canResolve } = await provider.checkConnection();
+      if (config.resolveWhenDone && canResolve === false) {
+        return {
+          ok: false,
+          errors: [`Connected to ${provider.displayName}, but this token cannot resolve errors. Give it Issue & Event: Read & Write (event:write), or switch off "Resolve fixed errors".`],
+        };
+      }
+      if (config.resolveWhenDone && canResolve === null) {
+        return {
+          ok: true,
+          warnings: [`Connected to ${provider.displayName}. It did not say whether this token may resolve errors; if it may not, the errors page will tell you.`],
+        };
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, errors: [errorMessage(err)] };
+    }
   },
 });
 

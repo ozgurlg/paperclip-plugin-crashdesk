@@ -152,6 +152,31 @@ test("listIssues can list resolved errors, latest first", async () => {
   assert.equal(url.searchParams.get("statsPeriod"), "7d");
 });
 
+test("checkConnection reads one issue and reports whether the token may resolve", async () => {
+  const seen: string[] = [];
+  const reply = (scopes: unknown) => (): Response =>
+    new Response(JSON.stringify(seen.length === 1 ? [] : { auth: scopes === undefined ? null : { scopes } }), { status: 200 });
+
+  assert.deepEqual(await provider(reply(["event:read", "event:write"]), seen).checkConnection!(), { canResolve: true });
+  assert.equal(new URL(seen[0]!).pathname, "/api/0/organizations/acme/issues/");
+  assert.equal(new URL(seen[0]!).searchParams.get("limit"), "1");
+  assert.equal(seen[1], "https://de.sentry.io/api/0/");
+
+  seen.length = 0;
+  assert.deepEqual(await provider(reply(["event:read"]), seen).checkConnection!(), { canResolve: false });
+  // A data region does not list scopes; sentry.io is asked next.
+  seen.length = 0;
+  assert.deepEqual(await provider(reply(undefined), seen).checkConnection!(), { canResolve: null });
+  assert.deepEqual(seen.slice(1), ["https://de.sentry.io/api/0/", "https://sentry.io/api/0/"]);
+});
+
+test("checkConnection fails when the read fails", async () => {
+  await assert.rejects(
+    provider(() => new Response("{}", { status: 401 })).checkConnection!(),
+    (err: unknown) => err instanceof ProviderError && err.kind === "auth",
+  );
+});
+
 test("HTTP errors become readable ProviderErrors without the token", async () => {
   for (const [status, kind] of [
     [401, "auth"],

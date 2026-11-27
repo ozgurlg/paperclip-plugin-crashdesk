@@ -56,7 +56,12 @@ export function createSentryProvider(options: SentryOptions): ErrorProvider {
   const get = (path: string, params: URLSearchParams) => send("GET", path, params);
 
   async function send(method: "GET" | "PUT", path: string, params: URLSearchParams, body?: unknown): Promise<unknown> {
-    const url = `${base}/api/0/organizations/${org}${path}?${params.toString()}`;
+    // "/api/…" is a path from the API root; everything else is under the organization.
+    const url = path.startsWith("https://")
+      ? path
+      : path.startsWith("/api/")
+        ? `${base}${path}`
+        : `${base}/api/0/organizations/${org}${path}?${params.toString()}`;
     let response: Response;
     try {
       response = await options.fetch(url, {
@@ -131,6 +136,27 @@ export function createSentryProvider(options: SentryOptions): ErrorProvider {
       const issue = parseIssue(rawIssue, period, Date.now());
       const event = Array.isArray(rawEvents) ? rawEvents[0] : undefined;
       return { issue, ...parseEvent(event) };
+    },
+
+    async checkConnection() {
+      // The same read the sync makes, one row: proves the URL, the organization and event:read.
+      const params = scopeParams();
+      params.set("query", "is:unresolved");
+      params.set("limit", "1");
+      await get("/issues/", params);
+      // The API root lists the token's scopes. A sentry.io data region (de.sentry.io) does not,
+      // only sentry.io itself does; a self-hosted Sentry may not either, so unknown is fine.
+      const roots = ["/api/0/"];
+      if (/^https:\/\/[a-z0-9-]+\.sentry\.io$/.test(base)) roots.push("https://sentry.io/api/0/");
+      for (const root of roots) {
+        try {
+          const scopes = obj(obj(await send("GET", root, new URLSearchParams())).auth).scopes;
+          if (Array.isArray(scopes)) return { canResolve: scopes.some((s) => s === "event:write" || s === "event:admin") };
+        } catch {
+          // Try the next root, or report unknown.
+        }
+      }
+      return { canResolve: null };
     },
 
     async resolveIssue(issueId) {

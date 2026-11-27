@@ -379,7 +379,9 @@ async function resolveFinished(ctx: PluginContext, companyId: string): Promise<n
     }
     ctx.logger.info("Resolved errors with finished tasks", { companyId, count: closed.size });
   }
-  await ctx.state.set(resolveErrorKey(companyId), failure);
+  // Paperclip stores state as non-null JSON: clear the key instead of writing null.
+  if (failure) await ctx.state.set(resolveErrorKey(companyId), failure);
+  else await ctx.state.delete(resolveErrorKey(companyId));
   return closed.size;
 }
 

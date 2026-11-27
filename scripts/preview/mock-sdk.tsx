@@ -41,12 +41,13 @@ const resolved = [
 const overview = {
   configured: true,
   provider: "Sentry",
+  resolveWhenDone: true,
   defaultAssignee: new URLSearchParams(location.search).has("fresh") ? "" : "agent:lead",
   snapshot: { period: "24h", fetchedAt: hours(0.03), ok: true, error: null, issues, resolved },
   links: {
     "4806": { id: "t3", identifier: "ACME-39", status: "done", title: "Fix SHOP-APP-6" },
     "4801": { id: "t1", identifier: "ACME-41", status: "in_progress", title: "Fix SHOP-APP-1" },
-    "4803": { id: "t2", identifier: "ACME-37", status: "done", title: "Fix BLOG-3" },
+    "4803": { id: "t2", identifier: "ACME-37", status: "in_review", title: "Fix BLOG-3" },
   },
   targets: Object.fromEntries(
     issues.map((i) => [i.id, { projectId: "p1", projectName: "Shop app", projectSource: "mapping", assignee: new URLSearchParams(location.search).has("fresh") ? "" : "agent:lead", assigneeSource: "fallback" }]),

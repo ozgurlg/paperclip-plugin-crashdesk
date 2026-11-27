@@ -5,6 +5,7 @@
 **Error tracking for [Paperclip](https://github.com/paperclipai/paperclip).**
 See what is breaking in your apps, hand any error to an agent as a task in one click, and have the error closed when the task is done.
 
+[![npm](https://img.shields.io/npm/v/paperclip-plugin-crashdesk)](https://www.npmjs.com/package/paperclip-plugin-crashdesk)
 [![CI](https://github.com/ozgurlg/paperclip-plugin-crashdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/ozgurlg/paperclip-plugin-crashdesk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Paperclip plugin](https://img.shields.io/badge/paperclip-plugin-black)
@@ -66,22 +67,30 @@ Crashdesk is an early release (v0.1). It is in daily use against a small Sentry 
 
 You need Paperclip 2026.1117.0 or later, Node.js 20 or later, and a Sentry organization (sentry.io, the EU region, or self-hosted).
 
-Crashdesk is not on npm yet. Install it from source:
+On the machine that runs Paperclip:
+
+```bash
+npx paperclipai plugin install paperclip-plugin-crashdesk
+```
+
+Or in Paperclip, open **Settings → Plugins → Install Plugin** and enter `paperclip-plugin-crashdesk`.
+
+To update later, run `npx paperclipai plugin upgrade ozgurlg.crashdesk`. Your settings and routing are kept.
+
+<details>
+<summary>Install from source instead</summary>
 
 ```bash
 git clone https://github.com/ozgurlg/paperclip-plugin-crashdesk.git
 cd paperclip-plugin-crashdesk
 npm install
 npm run build
+npx paperclipai plugin install --local "$(pwd)"
 ```
 
-Then install the folder in Paperclip, either from the plugin manager (**Settings → Plugins → Install Plugin**, giving the full path of the folder) or from a terminal on the Paperclip machine:
+To update: `git pull && npm install && npm run build`, then disable and re-enable Crashdesk in the plugin manager so the worker reloads.
 
-```bash
-npx paperclipai plugin install --local /path/to/paperclip-plugin-crashdesk
-```
-
-To update later: `git pull && npm install && npm run build`, then disable and re-enable Crashdesk in the plugin manager so the worker reloads. Your settings and routing are kept.
+</details>
 
 ## Connect Sentry
 

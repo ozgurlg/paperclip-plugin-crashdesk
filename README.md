@@ -113,6 +113,10 @@ The **App Errors** card appears on the dashboard; its **Open Crashdesk** link (o
 | `get-error` | `id`: an error id from `list-errors` | One error with its exception, release, device and stack, as an untrusted-data block. |
 | `create-error-task` | `ids`: 1 to 10 error ids; `parentTaskId` (optional) | Creates one fix task for the error, or for several errors that share a root cause, routed like **Create task**. |
 
+**Claude Code agents** see these tools as `mcp__paperclip-assigned__ozgurlg_crashdesk_list-errors`, `..._get-error` and `..._create-error-task`. If your agents run Claude Code with an allow-list (`--allowedTools` or `permissions.allow` in their settings), add those three names, or the agent is refused when it calls them and **Triage with an agent** cannot open fix tasks.
+
+> **Known Paperclip issue (2026.1117.0 and the 2026.1126 nightly):** the agent MCP gateway returns `structuredContent: null` for every plugin tool, so Claude Code reports the reply as malformed ([paperclipai/paperclip#15253](https://github.com/paperclipai/paperclip/issues/15253), fix in [#10317](https://github.com/paperclipai/paperclip/pull/10317)). The call still runs: `create-error-task` opens and links the fix task, but the agent does not see the reply, and `get-error` returns nothing. Until the fix ships, an agent can read errors from Sentry's own MCP server and find the fix tasks it opened under the triage task.
+
 ## Security
 
 Error messages, file names and tags are written by your app and, indirectly, by its users. Someone can trigger an error whose message reads like an instruction. Crashdesk treats all of it as untrusted:

@@ -21,13 +21,13 @@ Sentry is already great at showing errors. What it cannot do is say "Software En
 ## Features
 
 - **Dashboard widget.** A small report on the Paperclip dashboard: unresolved and new errors, users affected, an hourly trend, one line per project showing how many of its errors already have a task, and the most frequent error.
-- **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project, or by what still needs a task. Works on a phone.
+- **Errors page.** Unresolved, new and regressed errors with users affected and a trend line, for the last 24 hours, 7 days or 14 days. Filter by project, or by what still needs a task. A **Resolved** view lists the errors that were closed, each with the task that fixed it. Works on a phone.
 - **Triage with an agent.** One click hands every error without a task to an agent. It groups them by root cause, opens a fix task for each cause worth fixing and skips the noise, so nobody sorts fifty errors by hand.
 - **Create task.** Turn an error into a Paperclip task. With a default assignee chosen, it is one click (priority follows the error level); **⋯** opens Paperclip's own pickers for a one-off change. The task carries the exception, the innermost stack frames, release, environment, device, and a link back to Sentry.
 - **No duplicates.** Each task is linked to its error, so the same error never becomes two open tasks, and the table shows every linked task's live status.
 - **Agent tools.** Agents can call `list-errors` and `get-error` to check on errors themselves, and `create-error-task` to open a fix task for one error or a group with the same root cause.
 - **Native look.** Built on Paperclip's own theme tokens and components. Follows light and dark mode.
-- **Closes the loop.** Switch on *Resolve fixed errors* and a finished task marks its error as resolved in the next release. The error leaves the list, and Sentry reports it as a regression if the fix did not hold.
+- **Closes the loop.** Switch on *Resolve fixed errors* and a finished task marks its error as resolved in the next release. The error moves to the Resolved view, and Sentry reports it as a regression if the fix did not hold.
 - **Read-only by default.** Needs one scope, `event:read`, and changes nothing in Sentry until you switch on resolving (which needs `event:write`).
 
 ## How a task looks

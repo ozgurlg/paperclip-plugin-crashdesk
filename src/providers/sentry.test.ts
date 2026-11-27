@@ -139,6 +139,19 @@ test("listIssues builds the documented query", async () => {
   assert.equal(url.searchParams.get("sort"), "freq");
 });
 
+test("listIssues can list resolved errors, latest first", async () => {
+  const seen: string[] = [];
+  await provider(() => new Response(JSON.stringify([rawIssue]), { status: 200 }), seen).listIssues({
+    period: "7d",
+    limit: 25,
+    status: "resolved",
+  });
+  const url = new URL(seen[0]!);
+  assert.equal(url.searchParams.get("query"), "is:resolved");
+  assert.equal(url.searchParams.get("sort"), "date");
+  assert.equal(url.searchParams.get("statsPeriod"), "7d");
+});
+
 test("HTTP errors become readable ProviderErrors without the token", async () => {
   for (const [status, kind] of [
     [401, "auth"],

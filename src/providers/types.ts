@@ -60,6 +60,8 @@ export interface ErrorIssueDetail {
 export interface ListOptions {
   period: "24h" | "7d" | "14d";
   limit: number;
+  /** Default "unresolved". "resolved" lists closed errors seen in the period, latest first. */
+  status?: "unresolved" | "resolved";
 }
 
 export interface ErrorProvider {

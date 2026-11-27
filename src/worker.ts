@@ -47,6 +47,8 @@ interface Snapshot {
   ok: boolean;
   error: string | null;
   issues: ErrorIssue[];
+  /** Closed errors seen in the period, latest first. Older snapshots have none. */
+  resolved?: ErrorIssue[];
 }
 
 interface LinkedTask {
@@ -172,7 +174,15 @@ async function runRefresh(
   let snapshot: Snapshot;
   try {
     const issues = await setup.provider.listIssues({ period, limit: DEFAULTS.issueLimit });
-    snapshot = { provider: setup.provider.displayName, period, fetchedAt: new Date().toISOString(), ok: true, error: null, issues };
+    // The closed list is a nice-to-have: if it fails, keep the last one and still show the open errors.
+    let resolved: ErrorIssue[];
+    try {
+      resolved = await setup.provider.listIssues({ period, limit: DEFAULTS.issueLimit, status: "resolved" });
+    } catch (err) {
+      ctx.logger.warn("Could not list resolved errors", { companyId, period, error: errorMessage(err) });
+      resolved = (await readSnapshot(ctx, companyId, period))?.resolved ?? [];
+    }
+    snapshot = { provider: setup.provider.displayName, period, fetchedAt: new Date().toISOString(), ok: true, error: null, issues, resolved };
     noteHealth(companyId, { syncError: null });
   } catch (err) {
     const message = errorMessage(err);
@@ -187,6 +197,7 @@ async function runRefresh(
       ok: false,
       error: message,
       issues: previous?.issues ?? [],
+      resolved: previous?.resolved ?? [],
     };
   }
   await ctx.state.set(stateKey(companyId, period), snapshot);
@@ -370,11 +381,15 @@ async function resolveFinished(ctx: PluginContext, companyId: string): Promise<n
 
   if (closed.size > 0) {
     await ctx.state.set(resolvedKey(companyId), resolved);
-    // Take them off the cached lists now; the next sync confirms it.
+    // Move them to the closed list now; the next sync confirms it.
     for (const [period, snapshot] of snapshots) {
       await ctx.state.set(stateKey(companyId, period), {
         ...snapshot,
         issues: snapshot.issues.filter((issue) => !closed.has(issue.id)),
+        resolved: [
+          ...snapshot.issues.filter((issue) => closed.has(issue.id)),
+          ...(snapshot.resolved ?? []).filter((issue) => !closed.has(issue.id)),
+        ],
       });
     }
     ctx.logger.info("Resolved errors with finished tasks", { companyId, count: closed.size });
@@ -433,7 +448,7 @@ const plugin: PaperclipPlugin = definePlugin({
         defaultAssignee: fallback,
         // Both keyed by provider issue id for the UI.
         links: Object.fromEntries(
-          result.issues.flatMap((issue) => {
+          [...result.issues, ...(result.resolved ?? [])].flatMap((issue) => {
             const link = links[originIdFor(DEFAULT_PROVIDER, issue.id)];
             return link ? [[issue.id, link]] : [];
           }),

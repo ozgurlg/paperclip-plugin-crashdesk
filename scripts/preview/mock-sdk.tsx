@@ -33,12 +33,18 @@ const issues = [
   issue(5, { title: "UnhandledRejection: AbortError", culprit: "", events: 3, users: 1, level: "info", firstSeen: hours(90) }),
 ];
 
+const resolved = [
+  issue(6, { title: "TypeError: Cannot read properties of null (reading 'address')", culprit: "screens/Checkout.tsx in ShippingForm", events: 14, users: 9, firstSeen: hours(70), lastSeen: hours(6), trend: trend(3) }),
+  issue(7, { title: "Error: ENOENT: no such file or directory, open 'drafts/index.json'", culprit: "lib/drafts.ts in loadDrafts", project: { id: "9", slug: "blog", name: "blog", platform: "node" }, shortId: "BLOG-7", events: 2, users: 0, level: "warning", firstSeen: hours(30), lastSeen: hours(20), trend: trend(1) }),
+];
+
 const overview = {
   configured: true,
   provider: "Sentry",
   defaultAssignee: new URLSearchParams(location.search).has("fresh") ? "" : "agent:lead",
-  snapshot: { period: "24h", fetchedAt: hours(0.03), ok: true, error: null, issues },
+  snapshot: { period: "24h", fetchedAt: hours(0.03), ok: true, error: null, issues, resolved },
   links: {
+    "4806": { id: "t3", identifier: "ACME-39", status: "done", title: "Fix SHOP-APP-6" },
     "4801": { id: "t1", identifier: "ACME-41", status: "in_progress", title: "Fix SHOP-APP-1" },
     "4803": { id: "t2", identifier: "ACME-37", status: "done", title: "Fix BLOG-3" },
   },
@@ -58,7 +64,7 @@ const projectMap = {
 
 export function usePluginData(key: string) {
   const empty = new URLSearchParams(location.search).has("empty");
-  const data = key === "overview" ? (empty ? { ...overview, snapshot: { ...overview.snapshot, issues: [] } } : overview) : projectMap;
+  const data = key === "overview" ? (empty ? { ...overview, snapshot: { ...overview.snapshot, issues: [], resolved: [] } } : overview) : projectMap;
   return { data, loading: false, error: null, refresh: () => {} };
 }
 

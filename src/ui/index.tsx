@@ -47,7 +47,15 @@ type Overview =
   | {
       configured: true;
       provider: string;
-      snapshot: { period: Period; fetchedAt: string; ok: boolean; error: string | null; issues: ErrorIssue[] };
+      snapshot: {
+        period: Period;
+        fetchedAt: string;
+        ok: boolean;
+        error: string | null;
+        issues: ErrorIssue[];
+        /** Closed errors seen in the period, latest first. */
+        resolved?: ErrorIssue[];
+      };
       links: Record<string, LinkedTask>;
       /** Where each error's task goes, keyed by issue id. */
       targets?: Record<string, Target>;
@@ -180,7 +188,7 @@ const CSS = `
 .cd-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .cd-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-.cd-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cd-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .cd-stat { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 14px 16px; border: 1px solid ${c.border}; border-radius: ${c.radius}; background: ${c.card}; color: inherit; cursor: pointer; min-width: 0; }
 .cd-stat:hover { border-color: ${c.mutedFg}; }
 .cd-stat[aria-pressed="true"] { border-color: ${c.fg}; }
@@ -205,6 +213,7 @@ const CSS = `
 @media (max-width: 860px) {
   .cd-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .cd-stat { padding: 12px; }
+  .cd-stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .cd-list-head { display: none; }
   .cd-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "main main" "events users" "task task"; row-gap: 12px; }
   .cd-cell-label { display: block; }
@@ -507,13 +516,16 @@ function IssueRow({
   period,
   action,
   form,
+  resolved = false,
 }: {
   issue: ErrorIssue;
   period: Period;
   action: ReactNode;
   form: ReactNode;
+  /** A closed error: no New or Regression flag, a Resolved one instead. */
+  resolved?: boolean;
 }) {
-  const hot = issue.isNew || issue.isRegression;
+  const hot = !resolved && (issue.isNew || issue.isRegression);
   return (
     <>
       <div className="cd-row">
@@ -526,18 +538,23 @@ function IssueRow({
               {issue.title}
             </a>
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px", fontSize: 12, color: c.mutedFg, minWidth: 0 }}>
-              {issue.isRegression && (
+              {resolved && (
+                <span className="cd-badge" style={{ color: c.green, borderColor: c.green }}>
+                  Resolved
+                </span>
+              )}
+              {!resolved && issue.isRegression && (
                 <span className="cd-badge" style={{ color: c.destructive, borderColor: c.destructive }}>
                   Regression
                 </span>
               )}
-              {issue.isNew && !issue.isRegression && (
+              {!resolved && issue.isNew && !issue.isRegression && (
                 <span className="cd-badge" style={{ color: c.fg }}>
                   New
                 </span>
               )}
               <span>{issue.project.name}</span>
-              <span>· first seen {timeAgo(issue.firstSeen)}</span>
+              <span>· {resolved ? `last seen ${timeAgo(issue.lastSeen)}` : `first seen ${timeAgo(issue.firstSeen)}`}</span>
               {issue.shortId && <span>· {issue.shortId}</span>}
             </div>
             {issue.culprit && (
@@ -718,7 +735,7 @@ function SetupCard({ message }: { message: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
-type Filter = "all" | "new" | "untracked" | "tracked";
+type Filter = "all" | "new" | "untracked" | "tracked" | "resolved";
 
 export function CrashdeskPage({ context }: PluginPageProps) {
   const companyId = context.companyId;
@@ -748,12 +765,15 @@ export function CrashdeskPage({ context }: PluginPageProps) {
 
   const issues = data?.configured ? data.snapshot.issues : [];
   const links = data?.configured ? data.links : {};
+  const closed = data?.configured ? (data.snapshot.resolved ?? []) : [];
   const projects = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const i of issues) seen.set(i.project.slug, i.project.name);
+    for (const i of [...issues, ...closed]) seen.set(i.project.slug, i.project.name);
     return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [issues]);
+  }, [issues, closed]);
   const inProject = project === "all" ? issues : issues.filter((i) => i.project.slug === project);
+  const closedInProject = project === "all" ? closed : closed.filter((i) => i.project.slug === project);
+  const closedByTask = closedInProject.filter((i) => links[i.id]?.status === "done").length;
 
   const stats = useMemo(() => {
     const tracked = inProject.filter((i) => isOpenTask(links[i.id])).length;
@@ -768,15 +788,18 @@ export function CrashdeskPage({ context }: PluginPageProps) {
     };
   }, [inProject, links]);
 
-  const visible = inProject.filter((i) =>
-    filter === "new"
-      ? i.isNew || i.isRegression
-      : filter === "untracked"
-        ? !isOpenTask(links[i.id])
-        : filter === "tracked"
-          ? isOpenTask(links[i.id])
-          : true,
-  );
+  const showClosed = filter === "resolved";
+  const visible = showClosed
+    ? closedInProject
+    : inProject.filter((i) =>
+        filter === "new"
+          ? i.isNew || i.isRegression
+          : filter === "untracked"
+            ? !isOpenTask(links[i.id])
+            : filter === "tracked"
+              ? isOpenTask(links[i.id])
+              : true,
+      );
 
   const tiles: Array<{ key: Filter; value: number; label: string; sub: string }> = [
     { key: "all", value: stats.all, label: "Unresolved", sub: `${plural(stats.users, "user")} affected` },
@@ -788,6 +811,12 @@ export function CrashdeskPage({ context }: PluginPageProps) {
     },
     { key: "untracked", value: stats.untracked, label: "Without a task", sub: "nobody is on these yet" },
     { key: "tracked", value: stats.tracked, label: "In progress", sub: "an open task covers these" },
+    {
+      key: "resolved",
+      value: closedInProject.length,
+      label: "Resolved",
+      sub: closedByTask > 0 ? `${closedByTask} by a finished task` : `seen in the last ${period}, now closed`,
+    },
   ];
 
   return (
@@ -889,7 +918,9 @@ export function CrashdeskPage({ context }: PluginPageProps) {
                     ? `No unresolved errors in the last ${period}.`
                     : filter === "untracked"
                       ? "Every error has a task."
-                      : "Nothing here for this filter."}
+                      : showClosed
+                        ? `No error seen in the last ${period} has been resolved yet.`
+                        : "Nothing here for this filter."}
                 </span>
               </div>
             ) : (
@@ -902,16 +933,18 @@ export function CrashdeskPage({ context }: PluginPageProps) {
                 </div>
                 {visible.map((issue) => {
                   const link = links[issue.id];
-                  const canCreate = !isOpenTask(link);
-                  const formOpen = openForm === issue.id;
+                  const canCreate = !showClosed && !isOpenTask(link);
+                  const formOpen = !showClosed && openForm === issue.id;
                   return (
                     <IssueRow
                       key={issue.id}
                       issue={issue}
                       period={period}
+                      resolved={showClosed}
                       action={
                         <>
                           {link && <TaskChip task={link} />}
+                          {showClosed && !link && <span style={{ fontSize: 12, color: c.mutedFg }}>Closed in {data.provider}</span>}
                           {canCreate && companyId && (
                             <CreateTaskButton
                               companyId={companyId}

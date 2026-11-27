@@ -109,12 +109,12 @@ export function createSentryProvider(options: SentryOptions): ErrorProvider {
     id: "sentry",
     displayName: "Sentry",
 
-    async listIssues({ period, limit }) {
+    async listIssues({ period, limit, status = "unresolved" }) {
       const params = scopeParams();
-      params.set("query", "is:unresolved");
+      params.set("query", status === "resolved" ? "is:resolved" : "is:unresolved");
       params.set("statsPeriod", period);
       params.set("groupStatsPeriod", GROUP_STATS[period]);
-      params.set("sort", "freq");
+      params.set("sort", status === "resolved" ? "date" : "freq");
       params.set("limit", String(Math.min(Math.max(limit, 1), 100)));
       const body = await get("/issues/", params);
       if (!Array.isArray(body)) throw new ProviderError("Unexpected issue list from Sentry", "unexpected");

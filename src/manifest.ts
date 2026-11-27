@@ -79,7 +79,7 @@ const manifest: PaperclipPluginManifestV1 = {
         type: "boolean",
         title: "Resolve fixed errors in Sentry",
         description:
-          "When an error's task is done, mark the error as resolved in the next release, so it leaves the list and comes back as a regression if the fix did not hold. Needs a token with Issue & Event: Read & Write.",
+          "When an error's task is done, mark the error as resolved in the next release, so it moves to the Resolved view and comes back as a regression if the fix did not hold. Needs a token with Issue & Event: Read & Write.",
         default: false,
       },
     },

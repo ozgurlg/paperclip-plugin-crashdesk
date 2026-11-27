@@ -5,7 +5,7 @@ Crashdesk grows in small, working steps. Each version is usable on its own.
 ## v0.1: errors in, tasks out (current)
 
 - Sentry provider, read-only by default (`event:read`). sentry.io, the EU region and self-hosted Sentry.
-- **Resolve fixed errors** (opt-in, needs `event:write`): a finished task marks its error as resolved in the next release, so it leaves the list and comes back as a regression if the fix did not hold.
+- **Resolve fixed errors** (opt-in, needs `event:write`): a finished task marks its error as resolved in the next release, so it moves to the Resolved view and comes back as a regression if the fix did not hold.
 - Background sync of the most frequent unresolved errors, cached per time range (24h, 7d, 14d).
 - Errors page: unresolved, new, without-a-task, in-progress and resolved counts that filter the list, and the errors with trend lines. Filter by project. Works on a phone.
 - **Triage with an agent**: one click hands the errors without a task to an agent, which groups them by root cause and opens the fix tasks.
@@ -15,6 +15,7 @@ Crashdesk grows in small, working steps. Each version is usable on its own.
 - Tasks are linked by origin, so an error is never turned into two open tasks, and the table shows each task's status.
 - Agent tools: `list-errors`, `get-error` and `create-error-task`.
 - Error text reaches agents only inside a labelled, sanitized untrusted-data block.
+- **Test Configuration** in the settings makes a real call to Sentry and checks the token's scopes.
 
 ## v0.2: projects and automation
 
@@ -22,6 +23,7 @@ Crashdesk grows in small, working steps. Each version is usable on its own.
 - **Errors tab on Paperclip projects**: a mapped project shows its own errors on its project page.
 - Rules that open a task by themselves, for example a new error affecting more than N users, or any regression. Off by default, with a daily limit.
 - Crash-free session rate per project (needs session data in Sentry), on the page and the dashboard widget.
+- More than the 25 most frequent errors per time range: paging or a search box.
 
 ## v0.3: reach
 

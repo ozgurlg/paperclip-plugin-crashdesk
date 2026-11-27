@@ -292,7 +292,7 @@ async function seenSentryProjects(ctx: PluginContext, companyId: string): Promis
   const seen = new Map<string, SeenProject>();
   for (const period of PERIODS) {
     const snapshot = await readSnapshot(ctx, companyId, period);
-    for (const issue of snapshot?.issues ?? []) {
+    for (const issue of [...(snapshot?.issues ?? []), ...(snapshot?.resolved ?? [])]) {
       const { slug, name, platform } = issue.project;
       if (slug) seen.set(slug, { slug, name, platform: platform ?? "" });
     }

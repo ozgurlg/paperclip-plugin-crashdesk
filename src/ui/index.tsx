@@ -1307,7 +1307,7 @@ function RoutingPanel({ companyId, onClose, onSaved }: { companyId: string; onCl
             const status = changed
               ? "Not saved"
               : row.projectSource === "mapping"
-                ? "Saved"
+                ? "" // Saved is the normal state; only what still needs a save is called out.
                 : row.projectSource === "name"
                   ? "Suggested, not saved"
                   : "Not set";

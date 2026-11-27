@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows
 - Resolve fixed errors in Sentry (opt-in setting): a finished task marks its error as resolved in the next release. Needs a token with `event:write`.
 - First-run question on the errors page: who gets errors (the default assignee).
 - `npm run preview`: the UI with example data, without a running Paperclip.
+- Resolved view on the errors page: the errors seen in the period that are now closed, each with the task that fixed it.
+- Test Configuration makes a real call to Sentry with the saved token, and says when resolving is on but the token is read-only.
 
 ### Changed
 
@@ -20,6 +22,12 @@ All notable changes to this project are documented here. The format follows
 - The dashboard widget is now a small report: totals with an hourly trend, one line per project with its task coverage, and the most frequent error.
 - The Projects panel is now Routing, with the default assignee (was: fallback assignee) first. Create task is one click as soon as an assignee is known.
 - Providers are created through `src/providers/index.ts`, so the worker no longer names Sentry.
+- The project filter also lists projects that only have resolved errors.
+
+### Fixed
+
+- A clean resolve pass stored `null` in plugin state, which Paperclip rejects, so Refresh and the sync job's resolve step failed.
+- Routing showed no platform for a project whose errors were all resolved.
 
 ## [0.1.0]
 
